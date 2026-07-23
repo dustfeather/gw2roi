@@ -114,7 +114,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, (CASE WHEN profit < 0 THEN '-' ELSE '' END || (abs(profit)/10000) || 'g ' || ((abs(profit)%10000)/100) || 's ' || (abs(profit)%100) || 'c' || ' (' || round(roi_pct::numeric, 1) || '%)') AS profit, ((craft_cost/10000) || 'g ' || ((craft_cost%10000)/100) || 's ' || (craft_cost%100) || 'c') AS craft_cost, (sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd') AS demand FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, (CASE WHEN profit < 0 THEN '-' ELSE '' END || (abs(profit)/10000) || 'g ' || ((abs(profit)%10000)/100) || 's ' || (abs(profit)%100) || 'c' || ' (' || round(roi_pct::numeric, 1) || '%)') AS profit, ((craft_cost/10000) || 'g ' || ((craft_cost%10000)/100) || 's ' || (craft_cost%100) || 'c') AS craft_cost, (sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd') AS demand, (CASE WHEN learn_method = 'BUY' THEN 'Recipe: ' || output_item_name ELSE output_item_name END) AS wiki_term FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
         }
       ],
       "fieldConfig": {
@@ -127,13 +127,17 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "GW2 Wiki — vendors / how to unlock",
-                    "url": "https://wiki.guildwars2.com/wiki/?search=${__data.fields.item:percentencode}",
+                    "title": "GW2 Wiki — recipe source, vendor & currency",
+                    "url": "https://wiki.guildwars2.com/wiki/${__data.fields.wiki_term:percentencode}",
                     "targetBlank": true
                   }
                 ]
               }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "wiki_term" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
           }
         ]
       },

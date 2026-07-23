@@ -144,3 +144,38 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 
 ## New finding
 - **No Postgres in `trading`** yet (only chatwoot has its own). §8's dedicated StatefulSet must be provisioned at setup + Secret `gw2-postgres` creds. Table is tiny (latest-only TRUNCATE+INSERT) → single replica, minimal resources.
+
+---
+
+## Status — 2026-07-23 (implemented & live)
+
+Bot **built, deployed, and confirmed writing to Postgres** end-to-end. Deploy run `29982787684` green; `craft_roi` populated live.
+
+### ✅ Done
+
+| Area | State |
+|---|---|
+| **Bun app** (`src/`) | config, gw2api (rate-limited, 429 backoff), datawars, coinVendor, cost (recursive cheapest-source + cycle guard + memo), roi (+ gates), db (pg Pool, DDL, TRUNCATE+INSERT), pipeline, index. Typecheck clean. |
+| **Cost/ROI model** (§4–5) | implemented as specced: `min(TP-buy, craft, coin)`, 15% fee, craft-and-list ROI + instant-flip floor + optimal figures. |
+| **Gates** (§6) | all 6 implemented, ConfigMap-tunable. |
+| **Coin-vendor** (§4) | bundled `data/coin-vendor.json` — **only** Thermocatalytic Reagent `46747`@150c so far (rest fall back to TP). |
+| **Image** | `Dockerfile` `oven/bun:1-alpine` multi-stage, no Playwright, `USER bun`. Pushed to `ghcr.io/dustfeather/gw2-crafting-roi-bot`. |
+| **Storage** (§8) | `gw2-postgres` StatefulSet (postgres:17-alpine) + 1Gi PVC + headless Service. `craft_roi` table (recipe_id PK), latest-only. |
+| **Schedule** (§7) | CronJob `gw2-crafting-roi` `0 * * * *`, ns `trading`, `imagePullSecrets: ghcr-pull`. |
+| **CI/CD** | `build.yml` (GHCR push, github-hosted) → `deploy.yml` (`workflow_run`/dispatch) on **in-cluster ARC runner `arc-df-gw2roi`**. `checkout@v5`. |
+| **Secrets = GitHub** | single source of truth. `deploy.yml` syncs `ARENA_NET_KEY` + `PG_PASSWORD` (GH Actions Secrets, set from gitignored `.env`) → k8s secrets `gw2-api-key` + `gw2-postgres-creds`. No plaintext in repo. |
+| **RBAC** | `gw2-ci-deployer` Role in trading (cronjobs/jobs/secrets/configmaps + statefulsets get/list/watch) bound to SA `arc-df-gw2roi-gha-rs-no-permission`. |
+| **Runner set** | `arc-df-gw2roi` (chart 0.14.1, min0/max2) in `k3s-cluster/bootstrap/arc-runner-sets.sh` + helm-installed. |
+| **First-run** | `deploy.yml` waits PG rollout then kicks `gw2-roi-init` job → `craft_roi` populated on deploy, no wait for schedule. **Confirmed: 1 row, ROI ~15.6%.** |
+
+### ⏳ Remaining
+
+1. **Grafana** (§9) — **deferred by user.** Data in PG, unseen. Add Postgres datasource (pw = `PG_PASSWORD`) + dashboard provider to Grafana provisioning ConfigMaps in `monitoring`, `rollout restart deploy/grafana`. Manifests staged in `k8s/grafana/` (namespace + password still to fill).
+2. **Verify hourly schedule fires** — only the init job has run; confirm a `0 * * * *` tick refreshes `craft_roi` unattended.
+3. **Gate tuning** — only **1 recipe** clears gates at current prices. Loosen `configmap.yaml` gates for more candidates, or accept (GW2 TP genuinely has few profitable crafts). Judge once Grafana is up.
+4. **Coin-vendor coverage** — expand `data/coin-vendor.json` beyond `46747` as more coin-buyable mats are confirmed; missing mats overprice crafts via TP fallback and hide real ROI.
+
+### Deviations from original design
+- **§7 image**: shipped `oven/bun:1-alpine` (not "node 26 + Bun") — Bun-only base, smaller, sidesteps the node-native-module concern entirely.
+- **§7 RBAC naming**: SA convention confirmed `arc-df-<repo>-gha-rs-no-permission` (not `arc-<repo>-…`); Role is `gw2-ci-deployer` (own, not a copy of `alpaca-ci-deployer`).
+- **§9 Grafana**: unchanged plan, deferred — not yet applied.

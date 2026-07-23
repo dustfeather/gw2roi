@@ -63,7 +63,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, fmt_coin(craft_cost) AS craft_cost, fmt_coin(list_revenue) AS list_revenue, fmt_coin(instant_sell_revenue) AS instant_sell, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY roi_pct DESC;"
         }
       ],
       "fieldConfig": {

@@ -118,7 +118,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, (CASE WHEN learn_method = 'BUY' THEN 'Recipe: ' || output_item_name ELSE output_item_name END) AS wiki_term FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, (CASE WHEN learn_method = 'BUY' THEN 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') ELSE 'https://gw2efficiency.com/crafting/calculator/a~1!b~1!c~1!d~1-' || output_item_id || '!e~0!f~1' END) AS link FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
         }
       ],
       "fieldConfig": {
@@ -131,8 +131,8 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "GW2 Wiki — recipe source, vendor & currency",
-                    "url": "https://wiki.guildwars2.com/wiki/${__data.fields.wiki_term:percentencode}",
+                    "title": "BUY → wiki recipe sheet (vendor & currency); DISCOVER → GW2Efficiency calculator",
+                    "url": "${__data.fields.link:raw}",
                     "targetBlank": true
                   }
                 ]
@@ -140,7 +140,7 @@
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "wiki_term" },
+            "matcher": { "id": "byName", "options": "link" },
             "properties": [{ "id": "custom.hidden", "value": true }]
           }
         ]

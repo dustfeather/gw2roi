@@ -65,7 +65,7 @@ Also displayed per row (context, not ranking):
 | supply overhang | `days_to_sell = sell_quantity / 1d_sell_sold ≤ 7` | won't sit forever |
 | ROI floor | `ROI ≥ 10%` | |
 | profit floor | `profit ≥ 100` copper (1s) | filters dust |
-| leaf obtainability | all leaves TP-or-coin | §4, code |
+| leaf obtainability | all leaves TP-buyable, coin-buyable, or free account-bound mat | §4, code |
 
 ---
 
@@ -119,7 +119,7 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 2. GW2: pull characters → max discipline ratings; pull unlocked + searchable recipes; filter to craftable-now set.
 3. Collect all output item ids + full ingredient closure ids.
 4. datawars2: bulk-fetch prices + velocity for every id.
-5. Load bundled coin-vendor mat JSON (in-memory, no fetch).
+5. Load bundled coin-vendor + free-mat JSON tables (in-memory, no fetch). Free mats = account-bound bulk mats (Bloodstone Dust, Dragonite Ore, Empyreal Fragment) priced at 0 — can't be TP-bought/sold or crafted, accumulate for free.
 6. Recursive cheapest-source cost per candidate; disqualify on bad leaves.
 7. Compute ROI + instant-flip + optimal figures.
 8. Apply gates.

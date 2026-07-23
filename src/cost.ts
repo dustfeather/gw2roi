@@ -1,8 +1,9 @@
-// Recursive cheapest-source cost (§4): cost(item) = min(buy-on-TP, craft-it, coin-vendor).
-// Leaves must be obtainable (TP-priced or coin-buyable) or the branch is disqualified.
+// Recursive cheapest-source cost (§4): cost(item) = min(buy-on-TP, craft-it, coin-vendor, free-mat).
+// Leaves must be obtainable (TP-priced, coin-buyable, or a free account-bound mat) or the branch is disqualified.
 import type { Recipe } from "./gw2api.ts";
 import type { TpData } from "./datawars.ts";
 import { coinVendorPrice } from "./coinVendor.ts";
+import { freeMatPrice } from "./freeMats.ts";
 
 export interface CostModel {
   tp: Map<number, TpData>;
@@ -34,6 +35,10 @@ export function costOf(
 
   const coin = coinVendorPrice(itemId);
   if (coin !== undefined) candidates.push(coin);
+
+  // Account-bound bulk mats: can't be TP-bought or crafted, but accumulate for free.
+  const free = freeMatPrice(itemId);
+  if (free !== undefined) candidates.push(free);
 
   // craft-it: only follow acyclic recipe branches
   if (!visited.has(itemId)) {

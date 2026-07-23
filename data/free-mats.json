@@ -1,0 +1,8 @@
+{
+  "_comment": "Account-bound bulk crafting mats that cannot be bought or sold on the TP and cannot be crafted. They accumulate for free from play (salvage, map/reward-track drops) and overflow their storage cap, so they cost 0 copper. Priced here as free byproducts so recipes consuming them are evaluable instead of disqualified as unobtainable leaves. Values are copper-per-single-unit. Extend as more free account-bound mats are confirmed.",
+  "prices": {
+    "46731": 0,
+    "46733": 0,
+    "46735": 0
+  }
+}

@@ -1,0 +1,32 @@
+# Grafana Postgres datasource for the ROI table (does not exist today — add it).
+# No provisioning sidecar in this cluster: mount this file into Grafana's
+# /etc/grafana/provisioning/datasources/ then `kubectl rollout restart deploy/grafana`.
+# (If a sidecar is later added, the label below lets it auto-load.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gw2-grafana-datasource
+  namespace: monitoring # EDIT if Grafana runs elsewhere
+  labels:
+    grafana_datasource: "1"
+data:
+  gw2-postgres.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: GW2-Postgres
+        uid: gw2-postgres
+        type: postgres
+        access: proxy
+        url: gw2-postgres.trading.svc.cluster.local:5432
+        user: gw2
+        jsonData:
+          database: gw2
+          sslmode: disable
+          postgresVersion: 1700
+          maxOpenConns: 2
+          timescaledb: false
+        secureJsonData:
+          # EDIT: same password as gw2-postgres-creds (or a dedicated read-only role).
+          password: CHANGE_ME
+        isDefault: false
+        editable: false

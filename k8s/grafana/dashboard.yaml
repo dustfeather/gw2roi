@@ -1,0 +1,112 @@
+# Dashboard ConfigMap. Mount at /var/lib/grafana/dashboards/gw2 (see dashboard-provider.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gw2-grafana-dashboard
+  namespace: monitoring # EDIT if Grafana runs elsewhere
+  labels:
+    grafana_dashboard: "1"
+data:
+  gw2-roi.json: |
+    {
+      "uid": "gw2-craft-roi",
+      "title": "GW2 Crafting ROI",
+      "tags": ["gw2", "trading"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5m",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Candidates passing gates",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT count(*) AS value FROM craft_roi;"
+            }
+          ],
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } } }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Best ROI %",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT max(roi_pct) AS value FROM craft_roi;"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1 } }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Last updated",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT max(updated_at) AS value FROM craft_roi;"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" } }
+        },
+        {
+          "id": 4,
+          "type": "table",
+          "title": "Top craftable items by ROI (craft-and-list)",
+          "gridPos": { "h": 20, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+          "targets": [
+            {
+              "refId": "A",
+              "format": "table",
+              "rawSql": "SELECT output_item_id AS item_id, output_item_count AS qty, round(roi_pct::numeric, 1) AS roi_pct, round(profit / 10000.0, 2) AS profit_gold, round(craft_cost / 10000.0, 2) AS craft_cost_gold, round(list_revenue / 10000.0, 2) AS list_revenue_gold, round(optimal_roi_pct::numeric, 1) AS optimal_roi_pct, round(instant_flip_floor / 10000.0, 2) AS flip_floor_gold, sell_sold_1d, round(days_to_sell::numeric, 2) AS days_to_sell FROM craft_roi ORDER BY roi_pct DESC;"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "custom": { "align": "right", "filterable": true } },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "item_id" },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "GW2Efficiency",
+                        "url": "https://gw2efficiency.com/tradingpost/item/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "roi_pct" },
+                "properties": [{ "id": "unit", "value": "percent" }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "optimal_roi_pct" },
+                "properties": [{ "id": "unit", "value": "percent" }]
+              }
+            ]
+          },
+          "options": {
+            "sortBy": [{ "displayName": "roi_pct", "desc": true }]
+          }
+        }
+      ]
+    }

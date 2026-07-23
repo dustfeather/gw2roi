@@ -1,0 +1,35 @@
+# CI deploy RBAC (§7). CronJob-only deploy surface — no Deployment verbs needed.
+# Mirrors alpaca-ci-deployer. Bind to the per-repo ARC runner ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gw2-ci-deployer
+  namespace: trading
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"] # kick a manual run: `kubectl create job --from=cronjob/...`
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"] # retune gates
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gw2-ci-deployer
+  namespace: trading
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gw2-ci-deployer
+subjects:
+  # Per-repo ARC runner SA (create the runner scale set at setup — none exists yet).
+  - kind: ServiceAccount
+    name: arc-gw2roi-gha-rs-no-permission # convention: arc-<repo>-gha-rs-no-permission
+    namespace: arc-runners

@@ -1,0 +1,61 @@
+# Dedicated Postgres 17 for the ROI bot. Single replica, 1Gi PVC, latest-only data.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw2-postgres
+  namespace: trading
+  labels: { app: gw2-postgres }
+spec:
+  clusterIP: None # headless: stable DNS gw2-postgres-0.gw2-postgres
+  selector: { app: gw2-postgres }
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gw2-postgres
+  namespace: trading
+  labels: { app: gw2-postgres }
+spec:
+  serviceName: gw2-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: gw2-postgres }
+  template:
+    metadata:
+      labels: { app: gw2-postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          envFrom:
+            - secretRef:
+                name: gw2-postgres-creds
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

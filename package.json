@@ -1,0 +1,20 @@
+{
+  "name": "gw2-crafting-roi-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ranks top-N craftable GW2 items by ROI into Grafana. Hourly k3s CronJob.",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "bun-types": "^1.1.38",
+    "typescript": "^5.7.2"
+  }
+}

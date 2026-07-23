@@ -1,0 +1,6 @@
+{
+  "_comment": "Crafting mats buyable from NPC vendors for a fixed coin price (copper per unit). Legacy 'Crafting Supplier' vendors were removed in 2016; entries here are perpetually coin-buyable mats confirmed to still exist. Values are copper-per-single-unit (not per-stack). Extend as more coin-vendor mats are confirmed.",
+  "prices": {
+    "46747": 150
+  }
+}

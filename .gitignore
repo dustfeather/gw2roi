@@ -1,0 +1,4 @@
+node_modules/
+.env
+graphify-out/
+*.log

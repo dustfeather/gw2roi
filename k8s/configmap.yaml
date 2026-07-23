@@ -1,0 +1,15 @@
+# Non-secret tuning: gates (§6) + ranking size. Edit + re-apply to retune; next CronJob run picks it up.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gw2-roi-config
+  namespace: trading
+data:
+  TOP_N: "100"
+  TP_KEEP_RATIO: "0.85"
+  GATE_MIN_SELL_SOLD_1D: "10"
+  GATE_MAX_DAYS_TO_SELL: "7"
+  GATE_MIN_ROI_PCT: "10"
+  GATE_MIN_PROFIT_COPPER: "100"
+  PGHOST: "gw2-postgres"
+  PGPORT: "5432"

@@ -1,0 +1,22 @@
+# Dashboard provider (does not exist today — add it). Points Grafana at a dir of dashboard JSON.
+# Mount into /etc/grafana/provisioning/dashboards/ and mount the dashboard ConfigMap at
+# /var/lib/grafana/dashboards/gw2, then `kubectl rollout restart deploy/grafana`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gw2-grafana-dashboard-provider
+  namespace: monitoring # EDIT if Grafana runs elsewhere
+data:
+  gw2-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: gw2
+        orgId: 1
+        folder: GW2
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 60
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards/gw2
+          foldersFromFilesStructure: false

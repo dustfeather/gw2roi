@@ -1,0 +1,35 @@
+# Hourly ROI recompute. Latest-only: each run TRUNCATE+INSERTs craft_roi.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gw2-crafting-roi
+  namespace: trading
+spec:
+  schedule: "0 * * * *" # hourly
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900 # 15 min hard cap
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: bot
+              image: ghcr.io/dustfeather/gw2-crafting-roi-bot:latest
+              imagePullPolicy: Always
+              envFrom:
+                - configMapRef:
+                    name: gw2-roi-config
+                - secretRef:
+                    name: gw2-api-key # ARENA_NET_KEY
+                - secretRef:
+                    name: gw2-postgres-creds # PGUSER/PGPASSWORD/PGDATABASE
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { memory: 512Mi }

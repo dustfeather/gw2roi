@@ -27,7 +27,7 @@
       "id": 2,
       "type": "stat",
       "title": "Best ROI %",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -42,7 +42,7 @@
       "id": 3,
       "type": "stat",
       "title": "Last updated",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -57,7 +57,7 @@
       "id": 4,
       "type": "table",
       "title": "Top craftable items by ROI (craft-and-list)",
-      "gridPos": { "h": 24, "w": 12, "x": 0, "y": 12 },
+      "gridPos": { "h": 28, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {

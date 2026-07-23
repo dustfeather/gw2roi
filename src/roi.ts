@@ -7,6 +7,7 @@ import { type CostModel, craftCost } from "./cost.ts";
 export interface RoiRow {
   recipe_id: number;
   output_item_id: number;
+  output_item_name: string; // filled for the top-N only (pipeline), "" otherwise
   output_item_count: number;
   // primary craft-and-list economics (instant-buy ingredients, list output)
   craft_cost: number; // per craft (all outputs)
@@ -64,6 +65,7 @@ export function scoreRecipe(
   const row: RoiRow = {
     recipe_id: r.id,
     output_item_id: r.output_item_id,
+    output_item_name: "", // resolved for the top-N in the pipeline
     output_item_count: outCount,
     craft_cost: Math.round(craftCostTotal),
     list_revenue: Math.round(listRevenue),

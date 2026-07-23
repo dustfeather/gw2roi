@@ -6,8 +6,9 @@ name: deploy
 # then applies the ConfigMap + CronJob. kubectl uses the pod's in-cluster config.
 #
 # Required GitHub Actions Secrets (Settings > Secrets and variables > Actions):
-#   ARENA_NET_KEY  - ArenaNet API key (account,characters,unlocks,inventories scopes)
-#   PG_PASSWORD    - password for the dedicated Postgres (bot + StatefulSet share it)
+#   ARENA_NET_KEY   - ArenaNet API key (account,characters,unlocks,inventories scopes)
+#   PG_PASSWORD     - password for the dedicated Postgres (bot + StatefulSet share it)
+#   GRAFANA_API_KEY - Grafana SA token (ci-dashboard-push) for dashboard provisioning
 #
 # NOT deployed here (bootstrap once with admin kubeconfig — Role lacks these verbs):
 #   k8s/rbac.yaml, k8s/postgres.yaml, the arc-df-gw2roi runner scale set.
@@ -75,3 +76,13 @@ jobs:
 
       - name: Show cronjob
         run: kubectl -n trading get cronjob gw2-crafting-roi -o wide
+
+      - name: Provision Grafana (dashboard + datasource)
+        env:
+          GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$GRAFANA_API_KEY" || { echo "missing GH secret GRAFANA_API_KEY"; exit 1; }
+          command -v jq >/dev/null || { apt-get update && apt-get install -y jq || sudo apt-get install -y jq; }
+          bash scripts/provision-grafana.sh

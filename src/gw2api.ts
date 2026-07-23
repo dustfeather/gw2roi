@@ -84,3 +84,16 @@ export async function fetchAllRecipeIds(): Promise<number[]> {
 export async function fetchRecipes(ids: number[]): Promise<Recipe[]> {
   return getBulk<Recipe>("/v2/recipes", ids);
 }
+
+interface Item {
+  id: number;
+  name: string;
+}
+
+// Item id -> display name. Used for the top-N output items only (gw2efficiency links).
+export async function fetchItemNames(ids: number[]): Promise<Map<number, string>> {
+  const items = await getBulk<Item>("/v2/items", ids);
+  const m = new Map<number, string>();
+  for (const it of items) m.set(it.id, it.name);
+  return m;
+}

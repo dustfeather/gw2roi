@@ -94,14 +94,14 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 
 ---
 
-## 9. UI — Grafana
+## 9. UI — Grafana (implemented via HTTP API)
 
-- Grafana in `monitoring` ns.
-- **No provisioning sidecar exists** (confirmed 2026-07-23). Grafana deploy = single `grafana` container, `grafana/grafana:12.3.1`. Fallback path is the real path:
-  - Datasources come from ConfigMap `grafana` (key `datasources.yaml`), mounted at `/etc/grafana/provisioning/datasources/datasources.yaml`. Currently only **Loki + Prometheus** — **add a Postgres datasource** entry (url `gw2-postgres.trading.svc:5432`, cross-ns is fine).
-  - **No dashboard provider mounted at all.** Add one: a dashboards provider yaml under `/etc/grafana/provisioning/dashboards/` + the dashboard JSON (new ConfigMap + volume mount on the grafana deploy), then `kubectl -n monitoring rollout restart deploy/grafana`.
-  - `provisioning` root = `/etc/grafana/provisioning` (grafana.ini `[paths]`).
-- Dashboard: table panel, `SELECT ... ORDER BY roi_pct DESC LIMIT :top_n`.
+- Grafana in `monitoring` ns, `grafana/grafana:12.3.1`, **Helm-managed** (grafana chart 10.5.15) — single `grafana` container, **no provisioning sidecar**. Because it's Helm-managed, any hand-edit to the `grafana` datasources ConfigMap is reverted on the next `helm upgrade`, so the ConfigMap route was **dropped**.
+- **Real path = Grafana HTTP API**, driven by `scripts/provision-grafana.sh` (idempotent create-or-update). Uses service account token `ci-dashboard-push` (`GRAFANA_API_KEY`). SA granted `datasources:create/write` + dashboard rights.
+  - **Postgres datasource** uid `gw2-postgres`, url `gw2-postgres.trading.svc.cluster.local:5432`, db/user `gw2`, `sslmode=disable`, password = `PG_PASSWORD`. Script health-checks Grafana→PG after upsert.
+  - **Dashboard** uid `gw2-craft-roi`, model in `k8s/grafana/dashboards/gw2-roi.json` (canonical), pushed via `POST /api/dashboards/db` overwrite. Stat row (count / best ROI / last-updated) + table panel `ORDER BY roi_pct DESC`. Item name column links to a GW2Efficiency TP **name search** (`?filter.search.term=<name:percentencode>`) — the bot resolves output item names (`/v2/items`) for the top-N and stores `output_item_name`.
+  - Wired into `deploy.yml` "Provision Grafana" step → reprovisions on every deploy.
+  - Stale `k8s/grafana/*.yaml` (ConfigMap datasource + dashboard-provider) kept only as the sidecar-based fallback; not applied.
 
 ---
 
@@ -167,11 +167,11 @@ Bot **built, deployed, and confirmed writing to Postgres** end-to-end. Deploy ru
 | **RBAC** | `gw2-ci-deployer` Role in trading (cronjobs/jobs/secrets/configmaps + statefulsets get/list/watch) bound to SA `arc-df-gw2roi-gha-rs-no-permission`. |
 | **Runner set** | `arc-df-gw2roi` (chart 0.14.1, min0/max2) in `k3s-cluster/bootstrap/arc-runner-sets.sh` + helm-installed. |
 | **First-run** | `deploy.yml` waits PG rollout then kicks `gw2-roi-init` job → `craft_roi` populated on deploy, no wait for schedule. **Confirmed: 1 row, ROI ~15.6%.** |
+| **Grafana** (§9) | **Live via HTTP API.** `scripts/provision-grafana.sh` upserts Postgres datasource `gw2-postgres` (health OK) + dashboard `gw2-craft-roi` from `k8s/grafana/dashboards/gw2-roi.json`. Wired into `deploy.yml`. SA `ci-dashboard-push` token = GH secret `GRAFANA_API_KEY`. **Confirmed end-to-end: dashboard queries PG live** (`https://grafana.itguys.ro/d/gw2-craft-roi`). |
 
 ### ⏳ Remaining
 
-1. **Grafana** (§9) — **deferred by user.** Data in PG, unseen. Add Postgres datasource (pw = `PG_PASSWORD`) + dashboard provider to Grafana provisioning ConfigMaps in `monitoring`, `rollout restart deploy/grafana`. Manifests staged in `k8s/grafana/` (namespace + password still to fill).
-2. **Verify hourly schedule fires** — only the init job has run; confirm a `0 * * * *` tick refreshes `craft_roi` unattended.
+1. **Verify hourly schedule fires** — only the init job has run; confirm a `0 * * * *` tick refreshes `craft_roi` unattended.
 3. **Gate tuning** — only **1 recipe** clears gates at current prices. Loosen `configmap.yaml` gates for more candidates, or accept (GW2 TP genuinely has few profitable crafts). Judge once Grafana is up.
 4. **Coin-vendor coverage** — expand `data/coin-vendor.json` beyond `46747` as more coin-buyable mats are confirmed; missing mats overprice crafts via TP fallback and hide real ROI.
 

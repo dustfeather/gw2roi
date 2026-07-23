@@ -3,6 +3,7 @@ import { config } from "./config.ts";
 import {
   fetchAllRecipeIds,
   fetchDisciplineRatings,
+  fetchItemNames,
   fetchRecipes,
   fetchUnlockedRecipeIds,
   type Recipe,
@@ -72,5 +73,11 @@ export async function run(): Promise<RoiRow[]> {
 
   // 9. Sort by primary ROI desc, take top-N.
   passing.sort((a, b) => b.roi_pct - a.roi_pct);
-  return passing.slice(0, config.topN);
+  const top = passing.slice(0, config.topN);
+
+  // Resolve output item names for the top-N only (for gw2efficiency search links).
+  const names = await fetchItemNames([...new Set(top.map((r) => r.output_item_id))]);
+  for (const r of top) r.output_item_name = names.get(r.output_item_id) ?? "";
+
+  return top;
 }

@@ -21,6 +21,7 @@ const DDL = `
 CREATE TABLE IF NOT EXISTS craft_roi (
   recipe_id           integer PRIMARY KEY,
   output_item_id      integer NOT NULL,
+  output_item_name    text    NOT NULL DEFAULT '',
   output_item_count   integer NOT NULL,
   craft_cost          bigint  NOT NULL,
   list_revenue        bigint  NOT NULL,
@@ -37,11 +38,14 @@ CREATE TABLE IF NOT EXISTS craft_roi (
   days_to_sell        double precision NOT NULL,
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
+-- migrate pre-existing tables (column added 2026-07-23)
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS output_item_name text NOT NULL DEFAULT '';
 `;
 
 const COLS = [
   "recipe_id",
   "output_item_id",
+  "output_item_name",
   "output_item_count",
   "craft_cost",
   "list_revenue",
@@ -62,6 +66,7 @@ function values(r: RoiRow): (number | string)[] {
   return [
     r.recipe_id,
     r.output_item_id,
+    r.output_item_name,
     r.output_item_count,
     r.craft_cost,
     r.list_revenue,

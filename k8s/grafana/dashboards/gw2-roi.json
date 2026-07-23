@@ -53,6 +53,21 @@
       "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" } }
     },
     {
+      "id": 5,
+      "type": "stat",
+      "title": "Learnable candidates",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT count(*) AS value FROM craft_roi_learnable;"
+        }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } } }
+    },
+    {
       "id": 4,
       "type": "table",
       "title": "Top craftable items by ROI (craft-and-list)",
@@ -88,6 +103,41 @@
       "options": {
         "sortBy": []
       }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Learnable recipes (not yet known) — free discovery first, then buyable sheets",
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, (CASE WHEN profit < 0 THEN '-' ELSE '' END || (abs(profit)/10000) || 'g ' || ((abs(profit)%10000)/100) || 's ' || (abs(profit)%100) || 'c' || ' (' || round(roi_pct::numeric, 1) || '%)') AS profit, ((craft_cost/10000) || 'g ' || ((craft_cost%10000)/100) || 's ' || (craft_cost%100) || 'c') AS craft_cost, (sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd') AS demand FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "item" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "GW2 Wiki — vendors / how to unlock",
+                    "url": "https://wiki.guildwars2.com/wiki/?search=${__data.fields.item:percentencode}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "sortBy": [] }
     }
   ]
 }

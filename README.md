@@ -31,31 +31,44 @@ Tuning env (defaults in `src/config.ts` / `k8s/configmap.yaml`): `TOP_N`, `TP_KE
 
 Namespace `trading`. Registry `ghcr.io/dustfeather/gw2-crafting-roi-bot` (pull secret `ghcr-pull`).
 
+**GitHub is the single source of truth for secrets** — they are set as GitHub Actions
+Secrets and pushed to the cluster by CI (`.github/workflows/deploy.yml`), never applied
+by hand. See [`k8s/SECRETS.md`](./k8s/SECRETS.md).
+
+### Bootstrap once (admin kubeconfig — the deployer Role can't do these)
+
 ```sh
-# 1. Secrets (fill in real values first — secrets.example.yaml is a template)
-kubectl apply -f k8s/secrets.example.yaml
+kubectl apply -f k8s/rbac.yaml       # gw2-ci-deployer Role/RoleBinding
+kubectl apply -f k8s/postgres.yaml   # dedicated Postgres 17 (StatefulSet + PVC + Service)
+# + create the arc-df-gw2roi ARC runner scale set (mirror an existing arc-df-* repo)
+```
 
-# 2. Postgres
-kubectl apply -f k8s/postgres.yaml
+### GitHub Secrets → cluster (CI-driven)
 
-# 3. Config + CronJob
-kubectl apply -f k8s/configmap.yaml -f k8s/cronjob.yaml
+```sh
+gh secret set ARENA_NET_KEY   # ArenaNet key
+gh secret set PG_PASSWORD     # Postgres password (must match grafana datasource)
+```
 
-# 4. CI deploy RBAC — EDIT the runner SA in rbac.yaml first (no gw2 SA exists yet)
-kubectl apply -f k8s/rbac.yaml
+`deploy.yml` runs on the `arc-df-gw2roi` runner after each successful build: it creates
+`gw2-api-key` + `gw2-postgres-creds` from those GitHub Secrets, then applies the
+ConfigMap + CronJob. Trigger manually with `gh workflow run deploy.yml`.
 
-# 5. Grafana provisioning (no sidecar today → mount + rollout restart; EDIT namespace)
+### Grafana provisioning + manual run
+
+```sh
+# No provisioning sidecar today → mount these + rollout restart (EDIT namespace + password)
 kubectl apply -f k8s/grafana/
 kubectl -n monitoring rollout restart deploy/grafana
 
-# manual run
+# kick an immediate run instead of waiting for the hourly schedule
 kubectl -n trading create job --from=cronjob/gw2-crafting-roi gw2-roi-manual
 ```
 
 ## Setup notes (from DESIGN.md, unresolved until you fill them)
 
-- **`rbac.yaml`**: set the ARC runner ServiceAccount name/namespace (no `gw2` SA exists yet — mirror `alpaca-ci-deployer`).
-- **`secrets.example.yaml`**: real `ARENA_NET_KEY` + Postgres password. Never commit real values.
-- **`k8s/grafana/*`**: set the Grafana namespace and the datasource password. Grafana has **no provisioning sidecar** — mount these ConfigMaps into Grafana's provisioning dirs and `rollout restart`.
+- **Runner scale set** `arc-df-gw2roi` doesn't exist yet — create it at bootstrap (mirror an existing `arc-df-*` repo); its SA is already referenced in `rbac.yaml`.
+- **Secrets**: set `ARENA_NET_KEY` + `PG_PASSWORD` as GitHub Actions Secrets (see `k8s/SECRETS.md`). Never commit real values.
+- **`k8s/grafana/*`**: set the Grafana namespace and the datasource password (= `PG_PASSWORD`). Grafana has **no provisioning sidecar** — mount these ConfigMaps into Grafana's provisioning dirs and `rollout restart`.
 - **`ghcr-refresh`** cron is suspended; only un-suspend if pulls start 401'ing.
 - **`data/coin-vendor.json`**: only the confirmed Thermocatalytic Reagent (`46747` @ 150c) is bundled. Add more coin-buyable mats as confirmed — anything missing just falls back to TP pricing.

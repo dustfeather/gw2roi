@@ -1,0 +1,66 @@
+name: deploy
+
+# GitHub is the single source of truth for cluster secrets. This job runs on the
+# in-cluster ARC runner (SA arc-df-gw2roi-gha-rs-no-permission, bound to the
+# gw2-ci-deployer Role) and pushes GitHub Actions Secrets into the trading ns,
+# then applies the ConfigMap + CronJob. kubectl uses the pod's in-cluster config.
+#
+# Required GitHub Actions Secrets (Settings > Secrets and variables > Actions):
+#   ARENA_NET_KEY  - ArenaNet API key (account,characters,unlocks,inventories scopes)
+#   PG_PASSWORD    - password for the dedicated Postgres (bot + StatefulSet share it)
+#
+# NOT deployed here (bootstrap once with admin kubeconfig — Role lacks these verbs):
+#   k8s/rbac.yaml, k8s/postgres.yaml, the arc-df-gw2roi runner scale set.
+
+on:
+  workflow_run:
+    workflows: ["build-and-push"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gw2roi
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # only deploy if the build succeeded (or on manual dispatch)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync secrets from GitHub -> trading ns
+        env:
+          ARENA_NET_KEY: ${{ secrets.ARENA_NET_KEY }}
+          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ARENA_NET_KEY" || { echo "missing GH secret ARENA_NET_KEY"; exit 1; }
+          test -n "$PG_PASSWORD"   || { echo "missing GH secret PG_PASSWORD"; exit 1; }
+
+          # ArenaNet API key
+          kubectl -n trading create secret generic gw2-api-key \
+            --from-literal=ARENA_NET_KEY="$ARENA_NET_KEY" \
+            --dry-run=client -o yaml | kubectl -n trading apply -f -
+
+          # Postgres creds — consumed by BOTH the StatefulSet and the bot.
+          # user/db are non-secret; password comes from GitHub.
+          kubectl -n trading create secret generic gw2-postgres-creds \
+            --from-literal=POSTGRES_USER=gw2 \
+            --from-literal=POSTGRES_DB=gw2 \
+            --from-literal=POSTGRES_PASSWORD="$PG_PASSWORD" \
+            --from-literal=PGUSER=gw2 \
+            --from-literal=PGDATABASE=gw2 \
+            --from-literal=PGPASSWORD="$PG_PASSWORD" \
+            --dry-run=client -o yaml | kubectl -n trading apply -f -
+
+      - name: Apply config + cronjob
+        run: |
+          set -euo pipefail
+          kubectl -n trading apply -f k8s/configmap.yaml
+          kubectl -n trading apply -f k8s/cronjob.yaml
+
+      - name: Show cronjob
+        run: kubectl -n trading get cronjob gw2-crafting-roi -o wide

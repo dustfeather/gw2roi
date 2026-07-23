@@ -29,7 +29,7 @@ roleRef:
   kind: Role
   name: gw2-ci-deployer
 subjects:
-  # Per-repo ARC runner SA (create the runner scale set at setup — none exists yet).
+  # Per-repo ARC runner SA (create runner scale set `arc-df-gw2roi` at setup — none exists yet).
   - kind: ServiceAccount
-    name: arc-gw2roi-gha-rs-no-permission # convention: arc-<repo>-gha-rs-no-permission
+    name: arc-df-gw2roi-gha-rs-no-permission # convention: arc-df-<repo>-gha-rs-no-permission
     namespace: arc-runners

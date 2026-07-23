@@ -73,7 +73,7 @@ data:
             {
               "refId": "A",
               "format": "table",
-              "rawSql": "SELECT output_item_name AS item, output_item_count AS qty, round(roi_pct::numeric, 1) AS roi_pct, round(profit / 10000.0, 2) AS profit_gold, round(craft_cost / 10000.0, 2) AS craft_cost_gold, round(list_revenue / 10000.0, 2) AS list_revenue_gold, round(optimal_roi_pct::numeric, 1) AS optimal_roi_pct, round(instant_sell_revenue / 10000.0, 2) AS instant_sell_gold, sell_sold_1d, round(days_to_sell::numeric, 2) AS days_to_sell FROM craft_roi ORDER BY roi_pct DESC;"
+              "rawSql": "SELECT output_item_name AS item, round(roi_pct::numeric, 1) AS roi_pct, round(profit / 10000.0, 2) AS profit_gold, round(craft_cost / 10000.0, 2) AS craft_cost_gold, round(list_revenue / 10000.0, 2) AS list_revenue_gold, round(optimal_roi_pct::numeric, 1) AS optimal_roi_pct, round(instant_sell_revenue / 10000.0, 2) AS instant_sell_gold, sell_sold_1d, round(days_to_sell::numeric, 2) AS days_to_sell FROM craft_roi ORDER BY roi_pct DESC;"
             }
           ],
           "fieldConfig": {

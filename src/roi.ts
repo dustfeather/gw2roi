@@ -9,9 +9,10 @@ export interface RoiRow {
   output_item_id: number;
   output_item_name: string; // filled for the top-N only (pipeline), "" otherwise
   output_item_count: number;
-  // primary craft-and-list economics (instant-buy ingredients, list output)
-  craft_cost: number; // per craft (all outputs)
-  list_revenue: number; // sell_price * keep, all outputs
+  // primary craft-and-list economics, per single output item
+  // (instant-buy ingredients, list output)
+  craft_cost: number; // per single output item
+  list_revenue: number; // sell_price * keep, per single output item
   profit: number;
   roi_pct: number;
   // also-displayed rows
@@ -50,14 +51,16 @@ export function scoreRecipe(
   const outCount = r.output_item_count > 0 ? r.output_item_count : 1;
   const keep = config.tpKeepRatio;
 
-  const craftCostTotal = cost * outCount;
-  const listRevenue = out.sell_price * keep * outCount;
-  const profit = listRevenue - craftCostTotal;
-  const roiPct = (profit / craftCostTotal) * 100;
+  // All values are per single output item; craftCost() already returns per-item
+  // cost (ingredient total / output_item_count), so no outCount scaling here.
+  const craftCostPer = cost;
+  const listRevenue = out.sell_price * keep;
+  const profit = listRevenue - craftCostPer;
+  const roiPct = (profit / craftCostPer) * 100;
 
-  const optCostTotal = (optCost ?? cost) * outCount;
-  const optProfit = listRevenue - optCostTotal;
-  const optRoiPct = (optProfit / optCostTotal) * 100;
+  const optCostPer = optCost ?? cost;
+  const optProfit = listRevenue - optCostPer;
+  const optRoiPct = (optProfit / optCostPer) * 100;
 
   const daysToSell =
     out.sell_sold_1d > 0 ? out.sell_quantity / out.sell_sold_1d : Infinity;
@@ -67,12 +70,12 @@ export function scoreRecipe(
     output_item_id: r.output_item_id,
     output_item_name: "", // resolved for the top-N in the pipeline
     output_item_count: outCount,
-    craft_cost: Math.round(craftCostTotal),
+    craft_cost: Math.round(craftCostPer),
     list_revenue: Math.round(listRevenue),
     profit: Math.round(profit),
     roi_pct: roiPct,
-    instant_sell_revenue: Math.round(out.buy_price * keep * outCount),
-    optimal_cost: Math.round(optCostTotal),
+    instant_sell_revenue: Math.round(out.buy_price * keep),
+    optimal_cost: Math.round(optCostPer),
     optimal_profit: Math.round(optProfit),
     optimal_roi_pct: optRoiPct,
     sell_price: out.sell_price,

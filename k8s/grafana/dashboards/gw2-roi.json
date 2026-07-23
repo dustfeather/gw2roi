@@ -47,7 +47,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT max(updated_at) AS value FROM craft_roi;"
+          "rawSql": "SELECT (extract(epoch FROM max(updated_at)) * 1000)::bigint AS value FROM craft_roi;"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" } }

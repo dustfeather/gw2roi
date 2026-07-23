@@ -71,8 +71,18 @@ jobs:
           set -euo pipefail
           kubectl -n trading delete job gw2-roi-init --ignore-not-found
           kubectl -n trading create job gw2-roi-init --from=cronjob/gw2-crafting-roi
-          kubectl -n trading wait --for=condition=complete job/gw2-roi-init --timeout=600s \
-            || { echo "init job did not complete"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
+          # Poll with `get` instead of `kubectl wait`: the CI Role (gw2-ci-deployer)
+          # grants get/list/create/delete on jobs but NOT watch, and `kubectl wait`
+          # opens a watch under the hood ("Failed to watch" spam).
+          for _ in $(seq 1 120); do
+            succeeded="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+            failed="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.failed}' 2>/dev/null || true)"
+            [ "$succeeded" = "1" ] && { echo "init job complete"; break; }
+            [ -n "$failed" ] && [ "$failed" != "0" ] && { echo "init job failed"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
+            sleep 5
+          done
+          [ "$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)" = "1" ] \
+            || { echo "init job did not complete in time"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
 
       - name: Show cronjob
         run: kubectl -n trading get cronjob gw2-crafting-roi -o wide

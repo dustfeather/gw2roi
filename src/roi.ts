@@ -15,7 +15,7 @@ export interface RoiRow {
   profit: number;
   roi_pct: number;
   // also-displayed rows
-  instant_flip_floor: number; // dump output to buy orders: buy_price * keep
+  instant_sell_revenue: number; // dump output to buy orders: buy_price * keep
   optimal_cost: number; // ingredients via patient buy orders
   optimal_profit: number;
   optimal_roi_pct: number;
@@ -71,7 +71,7 @@ export function scoreRecipe(
     list_revenue: Math.round(listRevenue),
     profit: Math.round(profit),
     roi_pct: roiPct,
-    instant_flip_floor: Math.round(out.buy_price * keep * outCount),
+    instant_sell_revenue: Math.round(out.buy_price * keep * outCount),
     optimal_cost: Math.round(optCostTotal),
     optimal_profit: Math.round(optProfit),
     optimal_roi_pct: optRoiPct,

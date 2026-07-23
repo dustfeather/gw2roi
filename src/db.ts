@@ -19,15 +19,14 @@ const pool = new Pool(
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS craft_roi (
-  recipe_id           integer PRIMARY KEY,
-  output_item_id      integer NOT NULL,
-  output_item_name    text    NOT NULL DEFAULT '',
-  output_item_count   integer NOT NULL,
-  craft_cost          bigint  NOT NULL,
-  list_revenue        bigint  NOT NULL,
-  profit              bigint  NOT NULL,
-  roi_pct             double precision NOT NULL,
-  instant_flip_floor  bigint  NOT NULL,
+  recipe_id            integer PRIMARY KEY,
+  output_item_name     text    NOT NULL DEFAULT '',
+  output_item_count    integer NOT NULL,
+  craft_cost           bigint  NOT NULL,
+  list_revenue         bigint  NOT NULL,
+  profit               bigint  NOT NULL,
+  roi_pct              double precision NOT NULL,
+  instant_sell_revenue bigint  NOT NULL,
   optimal_cost        bigint  NOT NULL,
   optimal_profit      bigint  NOT NULL,
   optimal_roi_pct     double precision NOT NULL,
@@ -40,18 +39,26 @@ CREATE TABLE IF NOT EXISTS craft_roi (
 );
 -- migrate pre-existing tables (column added 2026-07-23)
 ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS output_item_name text NOT NULL DEFAULT '';
+-- drop output_item_id: Grafana keys on name now (2026-07-23)
+ALTER TABLE craft_roi DROP COLUMN IF EXISTS output_item_id;
+-- rename instant_flip_floor -> instant_sell_revenue: not a flip, it's instant-sell of crafted output (2026-07-23)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'craft_roi' AND column_name = 'instant_flip_floor') THEN
+    ALTER TABLE craft_roi RENAME COLUMN instant_flip_floor TO instant_sell_revenue;
+  END IF;
+END $$;
 `;
 
 const COLS = [
   "recipe_id",
-  "output_item_id",
   "output_item_name",
   "output_item_count",
   "craft_cost",
   "list_revenue",
   "profit",
   "roi_pct",
-  "instant_flip_floor",
+  "instant_sell_revenue",
   "optimal_cost",
   "optimal_profit",
   "optimal_roi_pct",
@@ -65,14 +72,13 @@ const COLS = [
 function values(r: RoiRow): (number | string)[] {
   return [
     r.recipe_id,
-    r.output_item_id,
     r.output_item_name,
     r.output_item_count,
     r.craft_cost,
     r.list_revenue,
     r.profit,
     r.roi_pct,
-    r.instant_flip_floor,
+    r.instant_sell_revenue,
     r.optimal_cost,
     r.optimal_profit,
     r.optimal_roi_pct,

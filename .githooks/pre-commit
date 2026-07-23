@@ -1,0 +1,19 @@
+#!/bin/sh
+# gw2: validate staged JSON files (Grafana dashboards, configs) before commit.
+# A malformed dashboard JSON would silently break `scripts/provision-grafana.sh`.
+# Bypass with GW2_SKIP_JSON_CHECK=1.
+[ "${GW2_SKIP_JSON_CHECK:-0}" = "1" ] && exit 0
+command -v jq >/dev/null 2>&1 || { echo "pre-commit: jq not found, skipping JSON validation"; exit 0; }
+
+fail=0
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.json$'); do
+  [ -f "$f" ] || continue
+  if ! jq empty "$f" >/dev/null 2>&1; then
+    echo "pre-commit: invalid JSON -> $f"
+    jq empty "$f" || true
+    fail=1
+  fi
+done
+
+[ "$fail" = "0" ] || { echo "pre-commit: aborted — fix the JSON above (or GW2_SKIP_JSON_CHECK=1 to bypass)"; exit 1; }
+exit 0

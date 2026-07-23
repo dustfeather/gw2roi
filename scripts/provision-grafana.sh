@@ -29,6 +29,8 @@ command -v jq >/dev/null || { echo "jq required"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASH_JSON="$SCRIPT_DIR/../k8s/grafana/dashboards/gw2-roi.json"
 test -f "$DASH_JSON" || { echo "dashboard JSON not found: $DASH_JSON"; exit 1; }
+# Fail fast on malformed dashboard JSON before touching Grafana.
+jq empty "$DASH_JSON" >/dev/null 2>&1 || { echo "dashboard JSON invalid: $DASH_JSON"; jq empty "$DASH_JSON"; exit 1; }
 
 AUTH=(-H "Authorization: Bearer ${GRAFANA_API_KEY}" -H "Content-Type: application/json")
 api() { curl -sS -m 30 "${AUTH[@]}" "$@"; }

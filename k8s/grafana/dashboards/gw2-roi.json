@@ -111,14 +111,14 @@
     {
       "id": 6,
       "type": "table",
-      "title": "Learnable recipes (not yet known) — free discovery first, then buyable sheets",
+      "title": "Recipes to buy (unlearned sheets), by ROI",
       "gridPos": { "h": 24, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, learn_method AS learn, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, (CASE WHEN learn_method = 'BUY' THEN 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') ELSE 'https://gw2efficiency.com/crafting/calculator/a~1!b~1!c~1!d~1-' || output_item_id || '!e~0!f~1' END) AS link FROM craft_roi_learnable ORDER BY (learn_method = 'BUY'), roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') AS link FROM craft_roi_learnable ORDER BY roi_pct DESC;"
         }
       ],
       "fieldConfig": {
@@ -131,7 +131,7 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "BUY → wiki recipe sheet (vendor & currency); DISCOVER → GW2Efficiency calculator",
+                    "title": "GW2 Wiki — recipe sheet: vendor & currency",
                     "url": "${__data.fields.link:raw}",
                     "targetBlank": true
                   }

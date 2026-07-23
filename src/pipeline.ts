@@ -18,9 +18,11 @@ function disciplineOk(r: Recipe, ratings: Map<string, number>): boolean {
   return r.disciplines.some((d) => (ratings.get(d) ?? 0) >= r.min_rating);
 }
 
-// Already known: unlocked via discovery/sheet, or auto-learned at the required rating.
+// Known = craftable without buying a recipe sheet. GW2's /v2/account/recipes only reports
+// sheet (LearnedFromItem) unlocks, never discovery recipes — so we assume every discovery
+// recipe is (or will be) learned on demand. Only an unowned SHEET counts as not-known.
 function isKnown(r: Recipe, unlocked: Set<number>): boolean {
-  return unlocked.has(r.id) || r.flags.includes("AutoLearned");
+  return unlocked.has(r.id) || !r.flags.includes("LearnedFromItem");
 }
 
 // How a not-yet-known recipe is learned: "BUY" needs a purchased recipe sheet,

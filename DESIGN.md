@@ -100,7 +100,7 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 - **Real path = Grafana HTTP API**, driven by `scripts/provision-grafana.sh` (idempotent create-or-update). Uses service account token `ci-dashboard-push` (`GRAFANA_API_KEY`). SA granted `datasources:create/write` + dashboard rights.
   - **Postgres datasource** uid `gw2-postgres`, url `gw2-postgres.trading.svc.cluster.local:5432`, db/user `gw2`, `sslmode=disable`, password = `PG_PASSWORD`. Script health-checks Grafana→PG after upsert.
   - **Dashboard** uid `gw2-craft-roi`, model in `k8s/grafana/dashboards/gw2-roi.json` (canonical), pushed via `POST /api/dashboards/db` overwrite. Stat row (count / best ROI / last-updated) + table panel `ORDER BY roi_pct DESC`. Item name column links to a GW2Efficiency TP **name search** (`?filter.search.term=<name:percentencode>`) — the bot resolves output item names (`/v2/items`) for the top-N and stores `output_item_name`.
-  - Wired into `deploy.yml` "Provision Grafana" step → reprovisions on every deploy.
+  - **Run locally on demand**, not from CI: `set -a; . ./.env; set +a; bash scripts/provision-grafana.sh`. Dashboards persist in Grafana + in git (`k8s/grafana/dashboards/`); CI stays out of Grafana. No `GRAFANA_API_KEY` GH secret.
   - Stale `k8s/grafana/*.yaml` (ConfigMap datasource + dashboard-provider) kept only as the sidecar-based fallback; not applied.
 
 ---
@@ -167,7 +167,7 @@ Bot **built, deployed, and confirmed writing to Postgres** end-to-end. Deploy ru
 | **RBAC** | `gw2-ci-deployer` Role in trading (cronjobs/jobs/secrets/configmaps + statefulsets get/list/watch) bound to SA `arc-df-gw2roi-gha-rs-no-permission`. |
 | **Runner set** | `arc-df-gw2roi` (chart 0.14.1, min0/max2) in `k3s-cluster/bootstrap/arc-runner-sets.sh` + helm-installed. |
 | **First-run** | `deploy.yml` waits PG rollout then kicks `gw2-roi-init` job → `craft_roi` populated on deploy, no wait for schedule. **Confirmed: 1 row, ROI ~15.6%.** |
-| **Grafana** (§9) | **Live via HTTP API.** `scripts/provision-grafana.sh` upserts Postgres datasource `gw2-postgres` (health OK) + dashboard `gw2-craft-roi` from `k8s/grafana/dashboards/gw2-roi.json`. Wired into `deploy.yml`. SA `ci-dashboard-push` token = GH secret `GRAFANA_API_KEY`. **Confirmed end-to-end: dashboard queries PG live** (`https://grafana.itguys.ro/d/gw2-craft-roi`). |
+| **Grafana** (§9) | **Live via HTTP API, local-run.** `scripts/provision-grafana.sh` (reads `.env`) upserts Postgres datasource `gw2-postgres` (health OK) + dashboard `gw2-craft-roi` from `k8s/grafana/dashboards/gw2-roi.json`. SA `ci-dashboard-push`. Not in CI. **Confirmed end-to-end: dashboard queries PG live, item-name search links** (`https://grafana.itguys.ro/d/gw2-craft-roi`). |
 
 ### ⏳ Remaining
 

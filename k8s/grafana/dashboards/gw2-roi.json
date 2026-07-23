@@ -77,7 +77,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, (CASE WHEN profit < 0 THEN '-' ELSE '' END || (abs(profit)/10000) || 'g ' || ((abs(profit)%10000)/100) || 's ' || (abs(profit)%100) || 'c' || ' (' || round(roi_pct::numeric, 1) || '%)') AS profit, ((craft_cost/10000) || 'g ' || ((craft_cost%10000)/100) || 's ' || (craft_cost%100) || 'c') AS craft_cost, ((list_revenue/10000) || 'g ' || ((list_revenue%10000)/100) || 's ' || (list_revenue%100) || 'c') AS list_revenue, ((instant_sell_revenue/10000) || 'g ' || ((instant_sell_revenue%10000)/100) || 's ' || (instant_sell_revenue%100) || 'c') AS instant_sell, (sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd') AS demand FROM craft_roi ORDER BY roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, (CASE WHEN profit < 0 THEN '-' ELSE '' END || (abs(profit)/10000) || 'g ' || ((abs(profit)%10000)/100) || 's ' || (abs(profit)%100) || 'c' || ' (' || round(roi_pct::numeric, 1) || '%)') AS profit, ((craft_cost/10000) || 'g ' || ((craft_cost%10000)/100) || 's ' || (craft_cost%100) || 'c') AS craft_cost, ((list_revenue/10000) || 'g ' || ((list_revenue%10000)/100) || 's ' || (list_revenue%100) || 'c') AS list_revenue, ((instant_sell_revenue/10000) || 'g ' || ((instant_sell_revenue%10000)/100) || 's ' || (instant_sell_revenue%100) || 'c') AS instant_sell, (sell_sold_1d || ' in ' || round(days_to_sell::numeric, 2) || 'd') AS demand, output_item_id AS item_id FROM craft_roi ORDER BY roi_pct DESC;"
         }
       ],
       "fieldConfig": {
@@ -90,13 +90,17 @@
                 "id": "links",
                 "value": [
                   {
-                    "title": "Search on GW2Efficiency",
-                    "url": "https://gw2efficiency.com/tradingpost?filter.search.term=${__data.fields.item:percentencode}",
+                    "title": "Open in GW2Efficiency crafting calculator",
+                    "url": "https://gw2efficiency.com/crafting/calculator/a~1!b~1!c~1!d~1-${__data.fields.item_id}!e~0!f~1",
                     "targetBlank": true
                   }
                 ]
               }
             ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "item_id" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
           }
         ]
       },

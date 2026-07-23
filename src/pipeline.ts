@@ -14,8 +14,10 @@ import type { CostModel } from "./cost.ts";
 import { scoreRecipe, type RoiRow } from "./roi.ts";
 
 // Disciplines are trained high enough to make this recipe (ignores whether it's learned yet).
+// Must actually HAVE the discipline: a missing discipline must fail even when min_rating is 0,
+// otherwise every 0-rating recipe (e.g. basic Chef dishes) leaks in for untrained disciplines.
 function disciplineOk(r: Recipe, ratings: Map<string, number>): boolean {
-  return r.disciplines.some((d) => (ratings.get(d) ?? 0) >= r.min_rating);
+  return r.disciplines.some((d) => ratings.has(d) && ratings.get(d)! >= r.min_rating);
 }
 
 // Known = craftable without buying a recipe sheet. GW2's /v2/account/recipes only reports

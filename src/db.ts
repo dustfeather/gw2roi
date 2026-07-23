@@ -17,9 +17,21 @@ const pool = new Pool(
       },
 );
 
+// Shared copper -> "Xg Ys Zc" formatter so panel SQL stays DRY (one call, not a
+// repeated div/mod expression per money column).
+const FMT_DDL = `
+CREATE OR REPLACE FUNCTION fmt_coin(bigint) RETURNS text AS $$
+  SELECT (CASE WHEN $1 < 0 THEN '-' ELSE '' END)
+      || (abs($1) / 10000) || 'g '
+      || ((abs($1) % 10000) / 100) || 's '
+      || (abs($1) % 100) || 'c';
+$$ LANGUAGE sql IMMUTABLE;
+`;
+
 const DDL = `
 CREATE TABLE IF NOT EXISTS craft_roi (
   recipe_id            integer PRIMARY KEY,
+  output_item_id       integer NOT NULL DEFAULT 0,
   output_item_name     text    NOT NULL DEFAULT '',
   output_item_count    integer NOT NULL,
   craft_cost           bigint  NOT NULL,
@@ -36,8 +48,8 @@ CREATE TABLE IF NOT EXISTS craft_roi (
 );
 -- migrate pre-existing tables (column added 2026-07-23)
 ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS output_item_name text NOT NULL DEFAULT '';
--- drop output_item_id: Grafana keys on name now (2026-07-23)
-ALTER TABLE craft_roi DROP COLUMN IF EXISTS output_item_id;
+-- output_item_id back: known-table item links now open the GW2Efficiency calculator by id (2026-07-23)
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS output_item_id integer NOT NULL DEFAULT 0;
 -- rename instant_flip_floor -> instant_sell_revenue: not a flip, it's instant-sell of crafted output (2026-07-23)
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -56,6 +68,7 @@ ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_roi_pct;
 const LEARN_DDL = `
 CREATE TABLE IF NOT EXISTS craft_roi_learnable (
   recipe_id            integer PRIMARY KEY,
+  output_item_id       integer NOT NULL DEFAULT 0,
   output_item_name     text    NOT NULL DEFAULT '',
   output_item_count    integer NOT NULL,
   learn_method         text    NOT NULL DEFAULT '',
@@ -71,10 +84,12 @@ CREATE TABLE IF NOT EXISTS craft_roi_learnable (
   days_to_sell        double precision NOT NULL,
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS output_item_id integer NOT NULL DEFAULT 0;
 `;
 
 const COLS = [
   "recipe_id",
+  "output_item_id",
   "output_item_name",
   "output_item_count",
   "craft_cost",
@@ -91,6 +106,7 @@ const COLS = [
 
 const LEARN_COLS = [
   "recipe_id",
+  "output_item_id",
   "output_item_name",
   "output_item_count",
   "learn_method",
@@ -109,6 +125,7 @@ const LEARN_COLS = [
 function values(r: RoiRow, cols: readonly string[]): (number | string)[] {
   const all: Record<string, number | string> = {
     recipe_id: r.recipe_id,
+    output_item_id: r.output_item_id,
     output_item_name: r.output_item_name,
     output_item_count: r.output_item_count,
     learn_method: r.learn_method,
@@ -160,6 +177,7 @@ async function replaceTable(table: string, cols: readonly string[], rows: RoiRow
 export async function writeRows(known: RoiRow[], learnable: RoiRow[]): Promise<void> {
   const client = await pool.connect();
   try {
+    await client.query(FMT_DDL);
     await client.query(DDL);
     await client.query(LEARN_DDL);
   } finally {

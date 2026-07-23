@@ -171,7 +171,7 @@ Bot **built, deployed, and confirmed writing to Postgres** end-to-end. Deploy ru
 
 ### ⏳ Remaining
 
-1. **Verify hourly schedule fires** — only the init job has run; confirm a `0 * * * *` tick refreshes `craft_roi` unattended.
+1. **Observe a natural `0 * * * *` cron tick** refresh `craft_roi` unattended. On-demand runs are covered: `scripts/run-now.sh` spawns a Job from the CronJob template (identical image/spec), tails logs, verifies the row count, repushes the dashboard — confirmed working (fresh row, ROI 18.1%). Only the scheduled-firing itself is left to watch.
 3. **Gate tuning** — only **1 recipe** clears gates at current prices. Loosen `configmap.yaml` gates for more candidates, or accept (GW2 TP genuinely has few profitable crafts). Judge once Grafana is up.
 4. **Coin-vendor coverage** — expand `data/coin-vendor.json` beyond `46747` as more coin-buyable mats are confirmed; missing mats overprice crafts via TP fallback and hide real ROI.
 

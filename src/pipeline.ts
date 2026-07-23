@@ -4,6 +4,7 @@ import {
   fetchAllRecipeIds,
   fetchDisciplineRatings,
   fetchItemNames,
+  fetchOwnedDropOnlyMats,
   fetchRecipes,
   fetchUnlockedRecipeIds,
   type Recipe,
@@ -22,14 +23,16 @@ function isCraftable(r: Recipe, ratings: Map<string, number>, unlocked: Set<numb
 
 export async function run(): Promise<RoiRow[]> {
   // 1-2. Account state + recipe universe -> craftable-now set.
-  const [ratings, unlocked, allIds] = await Promise.all([
+  const [ratings, unlocked, allIds, ownedFreeMats] = await Promise.all([
     fetchDisciplineRatings(),
     fetchUnlockedRecipeIds(),
     fetchAllRecipeIds(),
+    fetchOwnedDropOnlyMats(),
   ]);
   console.log(
     `disciplines=${[...ratings].map(([d, r]) => `${d}:${r}`).join(",")} ` +
-      `unlocked=${unlocked.size} total_recipes=${allIds.length}`,
+      `unlocked=${unlocked.size} total_recipes=${allIds.length} ` +
+      `owned_free_mats=${ownedFreeMats.size}`,
   );
 
   const allRecipes = await fetchRecipes(allIds);
@@ -55,8 +58,8 @@ export async function run(): Promise<RoiRow[]> {
   const tp = await fetchTpData([...priceIds]);
   console.log(`priced_items=${tp.size}/${priceIds.size}`);
 
-  // 5. coin-vendor table is bundled (imported in cost model).
-  const model: CostModel = { tp, craftMap };
+  // 5. coin-vendor table is bundled (imported in cost model); owned drop-only mats join it as free leaves.
+  const model: CostModel = { tp, craftMap, freeMatIds: ownedFreeMats };
 
   // 6-8. Cost, ROI, gates.
   const memoInstant = new Map<number, number | null>();

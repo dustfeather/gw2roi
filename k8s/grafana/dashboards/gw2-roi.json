@@ -71,7 +71,7 @@
       "id": 4,
       "type": "table",
       "title": "Top craftable items by ROI (craft-and-list)",
-      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 4 },
+      "gridPos": { "h": 24, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -108,7 +108,7 @@
       "id": 6,
       "type": "table",
       "title": "Learnable recipes (not yet known) — free discovery first, then buyable sheets",
-      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 24, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {

@@ -29,7 +29,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Sync secrets from GitHub -> trading ns
         env:

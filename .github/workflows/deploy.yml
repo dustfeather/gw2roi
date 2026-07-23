@@ -62,5 +62,16 @@ jobs:
           kubectl -n trading apply -f k8s/configmap.yaml
           kubectl -n trading apply -f k8s/cronjob.yaml
 
+      - name: Wait for Postgres to be ready
+        run: kubectl -n trading rollout status statefulset/gw2-postgres --timeout=180s
+
+      - name: Kick an immediate run (populate craft_roi now, don't wait for schedule)
+        run: |
+          set -euo pipefail
+          kubectl -n trading delete job gw2-roi-init --ignore-not-found
+          kubectl -n trading create job gw2-roi-init --from=cronjob/gw2-crafting-roi
+          kubectl -n trading wait --for=condition=complete job/gw2-roi-init --timeout=600s \
+            || { echo "init job did not complete"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
+
       - name: Show cronjob
         run: kubectl -n trading get cronjob gw2-crafting-roi -o wide

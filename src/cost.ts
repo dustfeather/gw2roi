@@ -4,27 +4,23 @@ import type { Recipe } from "./gw2api.ts";
 import type { TpData } from "./datawars.ts";
 import { coinVendorPrice } from "./coinVendor.ts";
 
-export type PriceMode = "instant" | "optimal";
-// instant  = acquire ingredients by instant-buy at seller's ask (sell_price)
-// optimal  = acquire ingredients via patient buy orders (buy_price)
-
 export interface CostModel {
   tp: Map<number, TpData>;
   // output item id -> recipes (from the craftable-now set) that produce it
   craftMap: Map<number, Recipe[]>;
 }
 
-function tpPrice(tp: Map<number, TpData>, id: number, mode: PriceMode): number {
+// Ingredients acquired by instant-buy at seller's ask (sell_price).
+function tpPrice(tp: Map<number, TpData>, id: number): number {
   const d = tp.get(id);
   if (!d) return 0;
-  return mode === "instant" ? d.sell_price : d.buy_price;
+  return d.sell_price;
 }
 
 // Cheapest per-unit copper cost to obtain `itemId`, or null if unobtainable.
 export function costOf(
   model: CostModel,
   itemId: number,
-  mode: PriceMode,
   memo: Map<number, number | null> = new Map(),
   visited: Set<number> = new Set(),
 ): number | null {
@@ -33,7 +29,7 @@ export function costOf(
 
   const candidates: number[] = [];
 
-  const tpp = tpPrice(model.tp, itemId, mode);
+  const tpp = tpPrice(model.tp, itemId);
   if (tpp > 0) candidates.push(tpp);
 
   const coin = coinVendorPrice(itemId);
@@ -45,7 +41,7 @@ export function costOf(
     if (recipes) {
       visited.add(itemId);
       for (const r of recipes) {
-        const c = craftCost(model, r, mode, memo, visited);
+        const c = craftCost(model, r, memo, visited);
         if (c !== null) candidates.push(c);
       }
       visited.delete(itemId);
@@ -61,13 +57,12 @@ export function costOf(
 export function craftCost(
   model: CostModel,
   r: Recipe,
-  mode: PriceMode,
   memo: Map<number, number | null> = new Map(),
   visited: Set<number> = new Set(),
 ): number | null {
   let total = 0;
   for (const ing of r.ingredients) {
-    const c = costOf(model, ing.item_id, mode, memo, visited);
+    const c = costOf(model, ing.item_id, memo, visited);
     if (c === null) return null; // bad leaf -> whole craft disqualified
     total += c * ing.count;
   }

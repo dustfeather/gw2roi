@@ -17,9 +17,6 @@ export interface RoiRow {
   roi_pct: number;
   // also-displayed rows
   instant_sell_revenue: number; // dump output to buy orders: buy_price * keep
-  optimal_cost: number; // ingredients via patient buy orders
-  optimal_profit: number;
-  optimal_roi_pct: number;
   // liquidity / velocity (of the OUTPUT item)
   sell_price: number;
   buy_price: number;
@@ -39,14 +36,12 @@ export function scoreRecipe(
   model: CostModel,
   r: Recipe,
   memoInstant: Map<number, number | null>,
-  memoOptimal: Map<number, number | null>,
 ): Scored | null {
   const out = model.tp.get(r.output_item_id);
   if (!out) return null;
 
-  const cost = craftCost(model, r, "instant", memoInstant);
+  const cost = craftCost(model, r, memoInstant);
   if (cost === null || cost <= 0) return null; // bad leaf -> disqualified in cost model
-  const optCost = craftCost(model, r, "optimal", memoOptimal);
 
   const outCount = r.output_item_count > 0 ? r.output_item_count : 1;
   const keep = config.tpKeepRatio;
@@ -57,10 +52,6 @@ export function scoreRecipe(
   const listRevenue = out.sell_price * keep;
   const profit = listRevenue - craftCostPer;
   const roiPct = (profit / craftCostPer) * 100;
-
-  const optCostPer = optCost ?? cost;
-  const optProfit = listRevenue - optCostPer;
-  const optRoiPct = (optProfit / optCostPer) * 100;
 
   const daysToSell =
     out.sell_sold_1d > 0 ? out.sell_quantity / out.sell_sold_1d : Infinity;
@@ -75,9 +66,6 @@ export function scoreRecipe(
     profit: Math.round(profit),
     roi_pct: roiPct,
     instant_sell_revenue: Math.round(out.buy_price * keep),
-    optimal_cost: Math.round(optCostPer),
-    optimal_profit: Math.round(optProfit),
-    optimal_roi_pct: optRoiPct,
     sell_price: out.sell_price,
     buy_price: out.buy_price,
     sell_quantity: out.sell_quantity,

@@ -27,9 +27,6 @@ CREATE TABLE IF NOT EXISTS craft_roi (
   profit               bigint  NOT NULL,
   roi_pct              double precision NOT NULL,
   instant_sell_revenue bigint  NOT NULL,
-  optimal_cost        bigint  NOT NULL,
-  optimal_profit      bigint  NOT NULL,
-  optimal_roi_pct     double precision NOT NULL,
   sell_price          bigint  NOT NULL,
   buy_price           bigint  NOT NULL,
   sell_quantity       bigint  NOT NULL,
@@ -48,6 +45,10 @@ DO $$ BEGIN
     ALTER TABLE craft_roi RENAME COLUMN instant_flip_floor TO instant_sell_revenue;
   END IF;
 END $$;
+-- drop patient buy-order economics: optimal path removed, only instant-buy costing kept (2026-07-23)
+ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_cost;
+ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_profit;
+ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_roi_pct;
 `;
 
 const COLS = [
@@ -59,9 +60,6 @@ const COLS = [
   "profit",
   "roi_pct",
   "instant_sell_revenue",
-  "optimal_cost",
-  "optimal_profit",
-  "optimal_roi_pct",
   "sell_price",
   "buy_price",
   "sell_quantity",
@@ -79,9 +77,6 @@ function values(r: RoiRow): (number | string)[] {
     r.profit,
     r.roi_pct,
     r.instant_sell_revenue,
-    r.optimal_cost,
-    r.optimal_profit,
-    r.optimal_roi_pct,
     r.sell_price,
     r.buy_price,
     r.sell_quantity,

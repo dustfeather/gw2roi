@@ -60,11 +60,10 @@ export async function run(): Promise<RoiRow[]> {
 
   // 6-8. Cost, ROI, gates.
   const memoInstant = new Map<number, number | null>();
-  const memoOptimal = new Map<number, number | null>();
   const passing: RoiRow[] = [];
   let scored = 0;
   for (const r of craftable) {
-    const s = scoreRecipe(model, r, memoInstant, memoOptimal);
+    const s = scoreRecipe(model, r, memoInstant);
     if (!s) continue;
     scored++;
     if (s.passes) passing.push(s.row);

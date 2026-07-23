@@ -5,13 +5,29 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "5m",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": { "from": "now-90d", "to": "now" },
   "panels": [
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Trading post — cumulative bought vs sold vs net (gold)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "gw2-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT purchased_at AS time, sum(CASE WHEN kind='buy' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS bought, sum(CASE WHEN kind='sell' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS sold, sum(CASE WHEN kind='sell' THEN price*quantity ELSE -price*quantity END) OVER (ORDER BY purchased_at) / 10000.0 AS net FROM tp_transactions ORDER BY purchased_at;"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } } },
+      "options": { "tooltip": { "mode": "multi", "sort": "none" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } }
+    },
     {
       "id": 1,
       "type": "stat",
       "title": "Candidates passing gates",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -26,7 +42,7 @@
       "id": 2,
       "type": "stat",
       "title": "Best ROI %",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -41,7 +57,7 @@
       "id": 3,
       "type": "stat",
       "title": "Last updated",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -56,7 +72,7 @@
       "id": 5,
       "type": "stat",
       "title": "Learnable candidates",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -71,7 +87,7 @@
       "id": 4,
       "type": "table",
       "title": "Top craftable items by ROI (craft-and-list)",
-      "gridPos": { "h": 24, "w": 12, "x": 0, "y": 4 },
+      "gridPos": { "h": 24, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
@@ -112,7 +128,7 @@
       "id": 6,
       "type": "table",
       "title": "Recipes to buy (unlearned sheets), by ROI",
-      "gridPos": { "h": 24, "w": 12, "x": 12, "y": 4 },
+      "gridPos": { "h": 24, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {

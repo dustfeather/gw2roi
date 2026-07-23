@@ -125,3 +125,35 @@ export async function fetchOwnedDropOnlyMats(): Promise<Set<number>> {
   }
   return dropOnly;
 }
+
+export interface TpTxn {
+  id: number;
+  item_id: number;
+  kind: "buy" | "sell";
+  price: number; // copper per unit
+  quantity: number;
+  purchased: string; // ISO timestamp the transaction completed
+}
+
+// Completed trading-post transactions (buys + sells, ~last 90 days), paginated.
+// Needs the `tradingpost` scope on the API key.
+export async function fetchTpTransactions(): Promise<TpTxn[]> {
+  const out: TpTxn[] = [];
+  const kinds: { kind: "buy" | "sell"; path: string }[] = [
+    { kind: "buy", path: "buys" },
+    { kind: "sell", path: "sells" },
+  ];
+  for (const { kind, path } of kinds) {
+    for (let page = 0; page < 10; page++) {
+      const rows = await getJson<
+        { id: number; item_id: number; price: number; quantity: number; purchased: string | null }[]
+      >(`/v2/commerce/transactions/history/${path}?page=${page}&page_size=200`, true);
+      for (const r of rows) {
+        if (!r.purchased) continue; // only completed transactions
+        out.push({ id: r.id, item_id: r.item_id, kind, price: r.price, quantity: r.quantity, purchased: r.purchased });
+      }
+      if (rows.length < 200) break;
+    }
+  }
+  return out;
+}

@@ -2,6 +2,7 @@
 import pg from "pg";
 import { config } from "./config.ts";
 import type { RoiRow } from "./roi.ts";
+import type { TpTxn } from "./gw2api.ts";
 
 const { Pool } = pg;
 
@@ -185,6 +186,44 @@ export async function writeRows(known: RoiRow[], learnable: RoiRow[]): Promise<v
   }
   await replaceTable("craft_roi", COLS, known);
   await replaceTable("craft_roi_learnable", LEARN_COLS, learnable);
+}
+
+// TP transaction history. Accumulate-only (upsert by id) so it retains data even
+// after transactions age out of the API's ~90-day window.
+const TXN_DDL = `
+CREATE TABLE IF NOT EXISTS tp_transactions (
+  id           bigint PRIMARY KEY,
+  item_id      integer NOT NULL,
+  kind         text    NOT NULL,
+  price        bigint  NOT NULL,
+  quantity     integer NOT NULL,
+  purchased_at timestamptz NOT NULL
+);
+`;
+
+export async function writeTransactions(txns: TpTxn[]): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(TXN_DDL);
+    const CHUNK = 200;
+    for (let i = 0; i < txns.length; i += CHUNK) {
+      const chunk = txns.slice(i, i + CHUNK);
+      const params: (number | string)[] = [];
+      const tuples: string[] = [];
+      chunk.forEach((t, ti) => {
+        const b = ti * 6;
+        tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+        params.push(t.id, t.item_id, t.kind, t.price, t.quantity, t.purchased);
+      });
+      await client.query(
+        `INSERT INTO tp_transactions (id, item_id, kind, price, quantity, purchased_at)
+         VALUES ${tuples.join(",")} ON CONFLICT (id) DO NOTHING`,
+        params,
+      );
+    }
+  } finally {
+    client.release();
+  }
 }
 
 export async function closeDb(): Promise<void> {

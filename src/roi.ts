@@ -9,6 +9,8 @@ export interface RoiRow {
   output_item_id: number;
   output_item_name: string; // filled for the top-N only (pipeline), "" otherwise
   output_item_count: number;
+  // "" for the known table; "DISCOVER" (free) or "BUY" (recipe sheet) for the learnable table.
+  learn_method: string;
   // primary craft-and-list economics, per single output item
   // (instant-buy ingredients, list output)
   craft_cost: number; // per single output item
@@ -61,6 +63,8 @@ export function scoreRecipe(
     output_item_id: r.output_item_id,
     output_item_name: "", // resolved for the top-N in the pipeline
     output_item_count: outCount,
+    learn_method: "", // set by the pipeline for learnable rows
+
     craft_cost: Math.round(craftCostPer),
     list_revenue: Math.round(listRevenue),
     profit: Math.round(profit),

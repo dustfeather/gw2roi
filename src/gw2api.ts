@@ -19,7 +19,8 @@ async function getJson<T>(path: string, auth: boolean): Promise<T> {
     const res = await fetch(url, {
       headers: auth ? { Authorization: `Bearer ${config.arenaNetKey}` } : {},
     });
-    if (res.status === 429) {
+    // Retry rate-limits (429) and transient server errors (5xx) with linear backoff.
+    if (res.status === 429 || res.status >= 500) {
       const backoff = 1000 * (attempt + 1);
       await new Promise((r) => setTimeout(r, backoff));
       continue;

@@ -2,8 +2,8 @@ name: checks
 
 on:
   pull_request:
-  push:
-    branches: [main]
+# Push-to-main typecheck runs inside build-and-push (gates the image build),
+# so this workflow only needs to cover PRs.
 
 permissions:
   contents: read

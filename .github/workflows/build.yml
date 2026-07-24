@@ -15,7 +15,19 @@ env:
   IMAGE: ghcr.io/dustfeather/gw2-crafting-roi-bot
 
 jobs:
+  typecheck:
+    # Gate the image build on a passing typecheck. Reusable node-test auto-detects
+    # bun from bun.lock and runs `bun run typecheck`.
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v4
+    with:
+      runner: ubuntu-latest
+      run-typecheck: true
+      run-lint: false
+      run-test: false
+      run-audit: false
+
   build:
+    needs: typecheck
     runs-on: ubuntu-latest
     permissions:
       contents: read

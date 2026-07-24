@@ -16,4 +16,18 @@ for f in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.json$');
 done
 
 [ "$fail" = "0" ] || { echo "pre-commit: aborted — fix the JSON above (or GW2_SKIP_JSON_CHECK=1 to bypass)"; exit 1; }
+
+# TypeScript typecheck. Bypass with GW2_SKIP_TSC=1.
+if [ "${GW2_SKIP_TSC:-0}" != "1" ] && git diff --cached --name-only --diff-filter=ACM | grep -qE '\.ts$'; then
+  if command -v bun >/dev/null 2>&1; then
+    echo "pre-commit: running typecheck…"
+    if ! bun run typecheck; then
+      echo "pre-commit: aborted — typecheck failed (or GW2_SKIP_TSC=1 to bypass)"
+      exit 1
+    fi
+  else
+    echo "pre-commit: bun not found, skipping typecheck"
+  fi
+fi
+
 exit 0

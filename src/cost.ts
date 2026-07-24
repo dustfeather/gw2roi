@@ -42,8 +42,12 @@ export function costOf(
   const free = freeMatPrice(itemId);
   if (free !== undefined) candidates.push(free);
 
-  // Drop-only mats the account already owns (scanned from bank/material storage): free.
-  if (model.freeMatIds.has(itemId)) candidates.push(0);
+  // Mats the account already owns: free ONLY if not TP-obtainable (tpp === 0).
+  // Owning a TP-tradable mat does not make it free — it has a real resale value, and a
+  // recipe can consume more than the held stack. Pricing owned-but-tradable mats at 0
+  // (e.g. NoSell-flagged mats like Pristine Toxic Spore Sample, which is fully TP-traded)
+  // massively inflates ROI.
+  if (tpp === 0 && model.freeMatIds.has(itemId)) candidates.push(0);
 
   // craft-it: only follow acyclic recipe branches
   if (!visited.has(itemId)) {

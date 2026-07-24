@@ -17,7 +17,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT purchased_at AS time, sum(CASE WHEN kind='buy' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS bought, sum(CASE WHEN kind='sell' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS sold, sum(CASE WHEN kind='sell' THEN price*quantity ELSE -price*quantity END) OVER (ORDER BY purchased_at) / 10000.0 AS net FROM tp_transactions ORDER BY purchased_at;"
+          "rawSql": "WITH cum AS (SELECT purchased_at, sum(CASE WHEN kind='buy' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS bought, sum(CASE WHEN kind='sell' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS sold, sum(CASE WHEN kind='sell' THEN price*quantity ELSE -price*quantity END) OVER (ORDER BY purchased_at) / 10000.0 AS net FROM tp_transactions) SELECT time, bought, sold, net FROM (SELECT purchased_at AS time, bought, sold, net FROM cum UNION ALL (SELECT now() AS time, bought, sold, net FROM cum ORDER BY purchased_at DESC LIMIT 1)) x ORDER BY time;"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none", "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } } },

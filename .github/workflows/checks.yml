@@ -1,0 +1,21 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    # Reusable node CI from shared-workflows. bun.lock present -> auto-detects bun,
+    # runs `bun run typecheck`. Only typecheck is meaningful here (no lint/test scripts).
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v4
+    with:
+      runner: ubuntu-latest
+      run-typecheck: true
+      run-lint: false
+      run-test: false
+      run-audit: false

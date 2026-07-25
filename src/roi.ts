@@ -23,7 +23,7 @@ export interface RoiRow {
   sell_price: number;
   buy_price: number;
   sell_quantity: number;
-  sell_sold_1d: number;
+  sell_sold_day: number; // units/day, averaged over config.velocityWindow
   days_to_sell: number;
 }
 
@@ -55,8 +55,9 @@ export function scoreRecipe(
   const profit = listRevenue - craftCostPer;
   const roiPct = (profit / craftCostPer) * 100;
 
+  // sell_sold_day is a per-day rate, so this is in days regardless of the window.
   const daysToSell =
-    out.sell_sold_1d > 0 ? out.sell_quantity / out.sell_sold_1d : Infinity;
+    out.sell_sold_day > 0 ? out.sell_quantity / out.sell_sold_day : Infinity;
 
   const row: RoiRow = {
     recipe_id: r.id,
@@ -73,14 +74,14 @@ export function scoreRecipe(
     sell_price: out.sell_price,
     buy_price: out.buy_price,
     sell_quantity: out.sell_quantity,
-    sell_sold_1d: out.sell_sold_1d,
+    sell_sold_day: Math.round(out.sell_sold_day),
     days_to_sell: Number.isFinite(daysToSell) ? Math.round(daysToSell * 100) / 100 : 9999,
   };
 
   const g = config.gates;
   const passes =
     out.sell_price > 0 && // output sellable
-    out.sell_sold_1d >= g.minSellSold1d && // demand velocity
+    out.sell_sold_day >= g.minSellSoldDay && // demand velocity, units/day
     daysToSell <= g.maxDaysToSell && // supply overhang
     roiPct >= g.minRoiPct && // ROI floor
     profit >= g.minProfitCopper; // profit floor

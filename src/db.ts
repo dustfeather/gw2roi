@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS craft_roi (
   sell_price          bigint  NOT NULL,
   buy_price           bigint  NOT NULL,
   sell_quantity       bigint  NOT NULL,
-  sell_sold_1d        bigint  NOT NULL,
+  sell_sold_day        bigint  NOT NULL,
   days_to_sell        double precision NOT NULL,
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
@@ -62,6 +62,14 @@ END $$;
 ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_cost;
 ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_profit;
 ALTER TABLE craft_roi DROP COLUMN IF EXISTS optimal_roi_pct;
+-- rename sell_sold_1d -> sell_sold_day: velocity is now a per-day average over a
+-- configurable trailing window (default 7d), not a raw 1-day total (2026-07-25)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'craft_roi' AND column_name = 'sell_sold_1d') THEN
+    ALTER TABLE craft_roi RENAME COLUMN sell_sold_1d TO sell_sold_day;
+  END IF;
+END $$;
 `;
 
 // Learnable table: qualified-but-not-yet-known recipes. Same shape as craft_roi plus
@@ -81,11 +89,18 @@ CREATE TABLE IF NOT EXISTS craft_roi_learnable (
   sell_price          bigint  NOT NULL,
   buy_price           bigint  NOT NULL,
   sell_quantity       bigint  NOT NULL,
-  sell_sold_1d        bigint  NOT NULL,
+  sell_sold_day        bigint  NOT NULL,
   days_to_sell        double precision NOT NULL,
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS output_item_id integer NOT NULL DEFAULT 0;
+-- rename sell_sold_1d -> sell_sold_day (2026-07-25), see craft_roi above.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'craft_roi_learnable' AND column_name = 'sell_sold_1d') THEN
+    ALTER TABLE craft_roi_learnable RENAME COLUMN sell_sold_1d TO sell_sold_day;
+  END IF;
+END $$;
 `;
 
 const COLS = [
@@ -101,7 +116,7 @@ const COLS = [
   "sell_price",
   "buy_price",
   "sell_quantity",
-  "sell_sold_1d",
+  "sell_sold_day",
   "days_to_sell",
 ] as const;
 
@@ -119,7 +134,7 @@ const LEARN_COLS = [
   "sell_price",
   "buy_price",
   "sell_quantity",
-  "sell_sold_1d",
+  "sell_sold_day",
   "days_to_sell",
 ] as const;
 
@@ -138,7 +153,7 @@ function values(r: RoiRow, cols: readonly string[]): (number | string)[] {
     sell_price: r.sell_price,
     buy_price: r.buy_price,
     sell_quantity: r.sell_quantity,
-    sell_sold_1d: r.sell_sold_1d,
+    sell_sold_day: r.sell_sold_day,
     days_to_sell: r.days_to_sell,
   };
   return cols.map((c) => all[c] as number | string);

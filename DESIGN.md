@@ -15,7 +15,7 @@ For recipes I can craft *right now*, rank by return on investment (craft cost vs
 | Source | Use | Notes |
 |---|---|---|
 | **GW2 official API v2** (`api.guildwars2.com`) | recipes, unlocks, characters, item flags, listing depth | Bearer key from `.env` `ARENA_NET_KEY`; `?v=latest`; retry on random "invalid key" |
-| **datawars2** (`api.datawars2.ie/gw2/v1/items/json`) | prices + velocity | bulk `ids=`, no bot protection; `buy_price/sell_price/buy_quantity/sell_quantity/1d_sell_sold` |
+| **datawars2** (`api.datawars2.ie/gw2/v1/items/json`) | prices + velocity | bulk `ids=`, no bot protection; `buy_price/sell_price/buy_quantity/sell_quantity/<window>_sell_sold`. Velocity windows are `1d`/`2d`/`7d` (`1w_*` and `1h_*` return null); the field is a window TOTAL, divided by the window length to get `sell_sold_day`. Window selected by `VELOCITY_WINDOW`, default `7d`. |
 | **coin-vendor mats** | vendor-for-**coin** mat prices | **hardcoded JSON** `{item_id: coin_per_unit}` (~30–40 items, static; sourced once from wiki `## Acquisition` sections). No scrape, no browser. |
 
 ### Rate limiting (GW2 API)
@@ -61,8 +61,8 @@ Also displayed per row (context, not ranking):
 | Gate | Default | Meaning |
 |---|---|---|
 | output sellable | `sell_price > 0` | untradeable/bound items have no TP price ⇒ dropped (code) |
-| demand velocity | `1d_sell_sold ≥ 10` | real buyer throughput |
-| supply overhang | `days_to_sell = sell_quantity / 1d_sell_sold ≤ 7` | won't sit forever |
+| demand velocity | `sell_sold_day ≥ 10` | real buyer throughput |
+| supply overhang | `days_to_sell = sell_quantity / sell_sold_day ≤ 7` | won't sit forever |
 | ROI floor | `ROI ≥ 10%` | |
 | profit floor | `profit ≥ 100` copper (1s) | filters dust |
 | leaf obtainability | all leaves TP-buyable, coin-buyable, or free account-bound mat | §4, code |

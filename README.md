@@ -25,7 +25,12 @@ ARENA_NET_KEY=... DATABASE_URL=postgres://gw2:pw@localhost/gw2 bun run start
 ```
 
 Tuning env (defaults in `src/config.ts` / `k8s/configmap.yaml`): `TOP_N`, `TP_KEEP_RATIO`,
-`GATE_MIN_SELL_SOLD_1D`, `GATE_MAX_DAYS_TO_SELL`, `GATE_MIN_ROI_PCT`, `GATE_MIN_PROFIT_COPPER`.
+`VELOCITY_WINDOW` (`1d`/`2d`/`7d`, default `7d`), `GATE_MIN_SELL_SOLD_DAY`,
+`GATE_MAX_DAYS_TO_SELL`, `GATE_MIN_ROI_PCT`, `GATE_MIN_PROFIT_COPPER`.
+
+Demand velocity is averaged over `VELOCITY_WINDOW` and always expressed **per day**, so
+the gates keep their units whichever window is selected. A 1-day window swings ~0.6x-3x
+run to run on thin items, which flickers recipes on and off the board.
 
 ## Deploy
 

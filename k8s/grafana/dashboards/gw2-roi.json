@@ -5,7 +5,7 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "5m",
-  "time": { "from": "now-90d", "to": "now" },
+  "time": { "from": "now-24h", "to": "now" },
   "panels": [
     {
       "id": 7,
@@ -56,14 +56,14 @@
     {
       "id": 4,
       "type": "table",
-      "title": "Top craftable items by ROI (craft-and-list)",
+      "title": "Top craftable items by profit (craft-and-list)",
       "gridPos": { "h": 28, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY profit DESC;"
         }
       ],
       "fieldConfig": {
@@ -97,14 +97,14 @@
     {
       "id": 6,
       "type": "table",
-      "title": "Recipes to buy (unlearned sheets), by ROI",
+      "title": "Recipes to buy (unlearned sheets), by profit",
       "gridPos": { "h": 24, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') AS link FROM craft_roi_learnable ORDER BY roi_pct DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') AS link FROM craft_roi_learnable ORDER BY profit DESC;"
         }
       ],
       "fieldConfig": {

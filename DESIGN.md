@@ -62,7 +62,7 @@ Also displayed per row (context, not ranking):
 |---|---|---|
 | output sellable | `sell_price > 0` | untradeable/bound items have no TP price ⇒ dropped (code) |
 | demand velocity | `sell_sold_day ≥ 10` | real buyer throughput |
-| supply overhang | `days_to_sell = sell_quantity / sell_sold_day ≤ 7` | won't sit forever |
+| supply overhang | `days_to_sell = sell_quantity / sell_sold_day ≤ 14` | won't sit forever. Was 7 until 2026-07-25; measured over 2758 scored known recipes, 7 admitted 0 and sat below the p10 (12.3d) of everything else qualifying — it was the binding gate, not velocity |
 | ROI floor | `ROI ≥ 10%` | |
 | profit floor | `profit ≥ 100` copper (1s) | filters dust |
 | leaf obtainability | all leaves TP-buyable, coin-buyable, or free account-bound mat | §4, code |

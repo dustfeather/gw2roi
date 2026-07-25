@@ -11,7 +11,10 @@ data:
   # Gates below stay per-DAY whichever window is picked.
   VELOCITY_WINDOW: "7d"
   GATE_MIN_SELL_SOLD_DAY: "10"
-  GATE_MAX_DAYS_TO_SELL: "7"
+  # Listed sell-side supply ahead of you, in days. Was 7, which sat BELOW the entire
+  # distribution of otherwise-qualifying recipes (p10 = 12.3d) and admitted ~nothing
+  # except on a 1d-velocity noise spike. 14 keeps only the fastest-clearing decile.
+  GATE_MAX_DAYS_TO_SELL: "14"
   GATE_MIN_ROI_PCT: "10"
   GATE_MIN_PROFIT_COPPER: "100"
   PGHOST: "gw2-postgres"

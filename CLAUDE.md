@@ -99,6 +99,23 @@ provisioned from CI: dashboards live in `k8s/grafana/dashboards/` and are pushed
 
 Dashboard edits: commit and push to `main` immediately, no confirmation needed.
 
+## Grafana
+
+Dashboards live in `k8s/grafana/dashboards/` and are pushed with
+`scripts/provision-grafana.sh` (never by CI). `k8s/grafana/dashboard.yaml` is an older
+ConfigMap-provisioning variant kept in sync but not the one actually served.
+
+Both ROI tables sort in **SQL**, not via the panel's `sortBy` — the profit column is a
+formatted `fmt_coin` string (`"1g 23s 4c"`), so a UI sort would order it lexicographically.
+Change the `ORDER BY` if you want a different default sort.
+
+The two ROI tables carry **no `$__timeFilter`, deliberately** (decided 2026-07-25). `craft_roi`
+is latest-only — one TRUNCATE+INSERT per run, so every row shares a single `updated_at` and
+there is no history to filter across. A time filter would be all-or-nothing: full table when
+the picker window happens to span the last hourly run, blank otherwise. The time picker is
+meaningful only for the cumulative TP graph, which reads the accumulate-only `tp_transactions`.
+Making it meaningful for the tables means storing per-run snapshots instead.
+
 ## Notes
 
 - A thin board is a velocity-gate artifact, not a pricing bug. datawars2's `1d_sell_sold` is a true rolling 24h window (verified 2026-07-25: it is not zeroed after 00:00 UTC reset), but it is noisy enough on low-volume items to push them under `GATE_MIN_SELL_SOLD_DAY` at random. Hence the 7d default window.

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Ranks top-N craftable GW2 items by ROI into Grafana. Hourly k3s CronJob.",
+  "description": "Ranks top-N craftable GW2 items by profit into Grafana. Hourly k3s CronJob.",
   "scripts": {
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit"

@@ -119,11 +119,16 @@ export async function run(): Promise<RunResult> {
       `learnable: scored=${scoredLearn} passing=${passLearn.length}`,
   );
 
-  // 9. Rank + take top-N. Known by ROI; learnable free-first (DISCOVER before BUY), then ROI.
-  passKnown.sort((a, b) => b.roi_pct - a.roi_pct);
+  // 9. Rank + take top-N by absolute PROFIT (copper per craft), not ROI percent.
+  // ROI alone favours cheap crafts: a 5c -> 15c item is 200% ROI but 10c a pop, while a
+  // 3g -> 4g craft is 33% ROI and worth 300x more per craft. Selection and display must
+  // use the same key, otherwise top-N silently picks a different set than the board shows.
+  // ROI is still gated on (GATE_MIN_ROI_PCT) and still displayed alongside profit.
+  // Learnable stays free-first (DISCOVER before BUY), then profit.
+  passKnown.sort((a, b) => b.profit - a.profit);
   passLearn.sort((a, b) => {
     if (a.learn_method !== b.learn_method) return a.learn_method === "DISCOVER" ? -1 : 1;
-    return b.roi_pct - a.roi_pct;
+    return b.profit - a.profit;
   });
   const topKnown = passKnown.slice(0, config.topN);
   const topLearn = passLearn.slice(0, config.topN);

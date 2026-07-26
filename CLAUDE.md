@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `gw2-crafting-roi-bot` — a single-shot TypeScript/Bun batch job. One process run = one full
-recompute: pull GW2 account + market data, rank craftable recipes by ROI, `TRUNCATE`+`INSERT`
+recompute: pull GW2 account + market data, rank craftable recipes by profit, `TRUNCATE`+`INSERT`
 into Postgres, exit. Deployed as an hourly k3s CronJob in namespace `trading`; Grafana reads
 the tables live. No server, no long-lived state in the app.
 
@@ -108,6 +108,11 @@ ConfigMap-provisioning variant kept in sync but not the one actually served.
 Both ROI tables sort in **SQL**, not via the panel's `sortBy` — the profit column is a
 formatted `fmt_coin` string (`"1g 23s 4c"`), so a UI sort would order it lexicographically.
 Change the `ORDER BY` if you want a different default sort.
+
+**Profit is the single rank key** — `pipeline.ts` top-N selection, both table `ORDER BY`s, and
+the headline stat panel. If you change one, change all of them: selection and display sharing
+a key is what stops top-N from picking a different set than the board renders. ROI stays a
+gate (`GATE_MIN_ROI_PCT`) and a displayed figure, never a rank key.
 
 The two ROI tables carry **no `$__timeFilter`, deliberately** (decided 2026-07-25). `craft_roi`
 is latest-only — one TRUNCATE+INSERT per run, so every row shares a single `updated_at` and

@@ -36,17 +36,17 @@ data:
         {
           "id": 2,
           "type": "stat",
-          "title": "Best ROI %",
+          "title": "Best profit (per craft)",
           "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
           "datasource": { "type": "postgres", "uid": "gw2-postgres" },
           "targets": [
             {
               "refId": "A",
               "format": "table",
-              "rawSql": "SELECT max(roi_pct) AS value FROM craft_roi;"
+              "rawSql": "SELECT fmt_coin(max(profit)) AS value FROM craft_roi;"
             }
           ],
-          "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1 } }
+          "fieldConfig": { "defaults": { "unit": "none" } }
         },
         {
           "id": 3,
@@ -101,7 +101,7 @@ data:
             ]
           },
           "options": {
-            "sortBy": [{ "displayName": "roi_pct", "desc": true }]
+            "sortBy": [{ "displayName": "profit_gold", "desc": true }]
           }
         }
       ]

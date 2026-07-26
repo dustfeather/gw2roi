@@ -1,6 +1,9 @@
 # GW2 Crafting-ROI Bot — Design
 
-Surfaces the **top-N craftable items by ROI**, hourly, into Grafana. Every decision below was resolved in the `/grill-me` interview.
+Surfaces the **top-N craftable items by profit per craft**, hourly, into Grafana.
+(Rank key changed from ROI% to absolute profit on 2026-07-26 — ROI remains a gate and a
+displayed figure. Selection and display must share a key or top-N silently picks a
+different set than the board renders.) Every decision below was resolved in the `/grill-me` interview.
 
 ---
 
@@ -99,7 +102,7 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 - Grafana in `monitoring` ns, `grafana/grafana:12.3.1`, **Helm-managed** (grafana chart 10.5.15) — single `grafana` container, **no provisioning sidecar**. Because it's Helm-managed, any hand-edit to the `grafana` datasources ConfigMap is reverted on the next `helm upgrade`, so the ConfigMap route was **dropped**.
 - **Real path = Grafana HTTP API**, driven by `scripts/provision-grafana.sh` (idempotent create-or-update). Uses service account token `ci-dashboard-push` (`GRAFANA_API_KEY`). SA granted `datasources:create/write` + dashboard rights.
   - **Postgres datasource** uid `gw2-postgres`, url `gw2-postgres.trading.svc.cluster.local:5432`, db/user `gw2`, `sslmode=disable`, password = `PG_PASSWORD`. Script health-checks Grafana→PG after upsert.
-  - **Dashboard** uid `gw2-craft-roi`, model in `k8s/grafana/dashboards/gw2-roi.json` (canonical), pushed via `POST /api/dashboards/db` overwrite. Stat row (count / best ROI / last-updated) + table panel `ORDER BY roi_pct DESC`. Item name column links to a GW2Efficiency TP **name search** (`?filter.search.term=<name:percentencode>`) — the bot resolves output item names (`/v2/items`) for the top-N and stores `output_item_name`.
+  - **Dashboard** uid `gw2-craft-roi`, model in `k8s/grafana/dashboards/gw2-roi.json` (canonical), pushed via `POST /api/dashboards/db` overwrite. Stat row (count / best profit / last-updated) + table panel `ORDER BY profit DESC`. Item name column links to a GW2Efficiency TP **name search** (`?filter.search.term=<name:percentencode>`) — the bot resolves output item names (`/v2/items`) for the top-N and stores `output_item_name`.
   - **Run locally on demand**, not from CI: `set -a; . ./.env; set +a; bash scripts/provision-grafana.sh`. Dashboards persist in Grafana + in git (`k8s/grafana/dashboards/`); CI stays out of Grafana. No `GRAFANA_API_KEY` GH secret.
   - Stale `k8s/grafana/*.yaml` (ConfigMap datasource + dashboard-provider) kept only as the sidecar-based fallback; not applied.
 

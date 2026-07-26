@@ -1,6 +1,6 @@
 # GW2 Crafting-ROI Bot
 
-Ranks the **top-N craftable items by ROI** and writes them to Postgres for Grafana.
+Ranks the **top-N craftable items by profit per craft** and writes them to Postgres for Grafana.
 Runs hourly as a k3s CronJob. Design: [`DESIGN.md`](./DESIGN.md).
 
 ## What it does (one run)
@@ -13,7 +13,8 @@ Runs hourly as a k3s CronJob. Design: [`DESIGN.md`](./DESIGN.md).
 6. Recursive cheapest-source cost per candidate: `min(TP instant-buy, craft-it, coin-vendor)`.
 7. Compute ROI, instant-flip floor, and optimal (buy-order) figures.
 8. Apply gates (§6).
-9. Sort by ROI desc, take top-N.
+9. Sort by profit desc, take top-N. (ROI is a gate and a displayed figure, not the rank key —
+   ranking by ROI favours cheap crafts worth a few copper each.)
 10. `TRUNCATE` + `INSERT` into `craft_roi`.
 11. Grafana reads live.
 

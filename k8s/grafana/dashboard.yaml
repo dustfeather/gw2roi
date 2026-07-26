@@ -46,7 +46,13 @@ data:
               "rawSql": "SELECT fmt_coin(max(profit)) AS value FROM craft_roi;"
             }
           ],
-          "fieldConfig": { "defaults": { "unit": "none" } }
+          "fieldConfig": { "defaults": { "unit": "none" } },
+          "options": {
+            "textMode": "value",
+            "graphMode": "none",
+            "colorMode": "none",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "/.*/", "values": false }
+          }
         },
         {
           "id": 3,

@@ -107,21 +107,25 @@ interface AccountSlot {
 // Item ids the account currently holds (material storage + bank) that are drop-only —
 // flagged NoSell or AccountBound, i.e. can't be bought off the TP. These join the bundled
 // free-mat table so recipes consuming mats the player already owns are no longer disqualified.
-export async function fetchOwnedDropOnlyMats(): Promise<Set<number>> {
+export async function fetchOwnedDropOnlyMats(): Promise<Map<number, number>> {
   const [materials, bank] = await Promise.all([
     getJson<AccountSlot[]>("/v2/account/materials", true),
     getJson<(AccountSlot | null)[]>("/v2/account/bank", true),
   ]);
 
-  const held = new Set<number>();
+  // Counts, not just ids: these mats can't be TP- or vendor-bought, so the cost model may only
+  // spend as many as are actually on hand (§4). Same item can occupy several bank slots.
+  const held = new Map<number, number>();
   for (const s of [...materials, ...bank]) {
-    if (s && s.id !== null && s.count > 0) held.add(s.id);
+    if (s && s.id !== null && s.count > 0) held.set(s.id, (held.get(s.id) ?? 0) + s.count);
   }
 
-  const items = await getBulk<{ id: number; flags: string[] }>("/v2/items", [...held]);
-  const dropOnly = new Set<number>();
+  const items = await getBulk<{ id: number; flags: string[] }>("/v2/items", [...held.keys()]);
+  const dropOnly = new Map<number, number>();
   for (const it of items) {
-    if (it.flags?.includes("NoSell") || it.flags?.includes("AccountBound")) dropOnly.add(it.id);
+    if (it.flags?.includes("NoSell") || it.flags?.includes("AccountBound")) {
+      dropOnly.set(it.id, held.get(it.id)!);
+    }
   }
   return dropOnly;
 }

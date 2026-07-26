@@ -37,12 +37,13 @@ export interface Scored {
 export function scoreRecipe(
   model: CostModel,
   r: Recipe,
-  memoInstant: Map<number, number | null>,
+  memoInstant: Map<string, number | null>,
 ): Scored | null {
   const out = model.tp.get(r.output_item_id);
   if (!out) return null;
 
-  const cost = craftCost(model, r, memoInstant);
+  // need=1: the board ranks a single craft, so ingredient demand is one recipe's worth.
+  const cost = craftCost(model, r, 1, memoInstant);
   if (cost === null || cost <= 0) return null; // bad leaf -> disqualified in cost model
 
   const outCount = r.output_item_count > 0 ? r.output_item_count : 1;

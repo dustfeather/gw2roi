@@ -87,14 +87,14 @@ export async function run(): Promise<RunResult> {
 
   // 5. Cost models. Known-table costing may only craft KNOWN intermediates; the learnable
   // table lets chains resolve through any qualified recipe (best-case for a recipe to learn).
-  const freeMatIds = ownedFreeMats;
-  const modelKnown: CostModel = { tp, craftMap: toCraftMap(known), freeMatIds };
-  const modelAll: CostModel = { tp, craftMap: toCraftMap(qualified), freeMatIds };
+  const ownedMats = ownedFreeMats;
+  const modelKnown: CostModel = { tp, craftMap: toCraftMap(known), ownedMats };
+  const modelAll: CostModel = { tp, craftMap: toCraftMap(qualified), ownedMats };
 
   // 6-8. Cost, ROI, gates for each set.
   const passKnown: RoiRow[] = [];
   let scoredKnown = 0;
-  const memoKnown = new Map<number, number | null>();
+  const memoKnown = new Map<string, number | null>();
   for (const r of known) {
     const s = scoreRecipe(modelKnown, r, memoKnown);
     if (!s) continue;
@@ -104,7 +104,7 @@ export async function run(): Promise<RunResult> {
 
   const passLearn: RoiRow[] = [];
   let scoredLearn = 0;
-  const memoLearn = new Map<number, number | null>();
+  const memoLearn = new Map<string, number | null>();
   for (const r of learnable) {
     const s = scoreRecipe(modelAll, r, memoLearn);
     if (!s) continue;

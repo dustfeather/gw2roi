@@ -38,10 +38,11 @@ Per-IP token bucket: **burst 300, refill 5/sec**. Limiter runs ~5 req/s sustaine
 
 ## 4. Cost model — recursive cheapest-source
 
-For each ingredient, `cost = min( buy-on-TP, craft-it, buy-from-coin-vendor )`, computed recursively.
+For each ingredient, `cost = min( buy-on-TP, craft-it, buy-from-coin-vendor, spend-held-stock )`, computed recursively.
 
-- **Leaf validity:** an ingredient is acceptable only if it is a **TP-buyable Item** (`sell_price > 0`) **OR** a **coin-vendor mat** (present in the hardcoded coin-price JSON).
-- **Disqualify the whole recipe** if any leaf is `Currency`, `GuildUpgrade`, karma, or otherwise not obtainable for gold/TP.
+- **Leaf validity:** an ingredient is acceptable only if it is a **TP-buyable Item** (`sell_price > 0`), a **coin-vendor mat** (present in the hardcoded coin-price JSON), or a drop-only mat the account **already holds in at least the quantity the craft consumes**.
+- **Supply is finite for held stock only.** TP and vendor supply is treated as unlimited, so the required quantity never constrains them. Drop-only mats are the opposite: they cannot be re-bought, so the recursion carries the demanded quantity down the tree and a leaf is only usable while `owned ≥ needed`. Without that, owning one Ley Line Spark would price all 25 a recipe needs at 0c.
+- **Disqualify the whole recipe** if any leaf is `Currency`, `GuildUpgrade`, karma, or otherwise not obtainable for gold/TP — including a drop-only mat held in insufficient quantity.
 - TP fee: **15%** on sale (`net = 0.85 × sale`), fixed in code.
 
 ---

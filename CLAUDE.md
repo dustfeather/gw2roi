@@ -45,10 +45,19 @@ uses a cost model whose `craftMap` contains only **known** intermediates; the le
 model may craft any qualified intermediate. Two separate memo maps — never share one across
 the two models.
 
-**Costing is recursive and memoized** (`src/cost.ts`). `costOf(item) = min(TP instant-buy at
-sell_price, craft-it, coin-vendor, free-mat)`; `visited` guards recipe cycles. A leaf with no
-obtainable price returns `null`, which disqualifies the entire branch — this null-propagation
-is the main correctness constraint. Owned mats are priced free **only** when not TP-obtainable
+**Costing is recursive and memoized** (`src/cost.ts`). `costOf(item, need) = min(TP instant-buy at
+sell_price, craft-it, coin-vendor, spend-held-stock)`; `visited` guards recipe cycles. A leaf with
+no obtainable price returns `null`, which disqualifies the entire branch — this null-propagation
+is the main correctness constraint.
+
+`need` is the **quantity demanded**, threaded down the tree (`craftCost` multiplies by
+`ceil(need / output_item_count)`) and part of the memo key. TP/vendor supply is unlimited so
+`need` never constrains it; held stock is finite, so a drop-only mat is only usable while
+`ownedMats.get(id) >= need`. That check is the only thing separating grind-gated map mats
+(Ley Line Spark, Pile of Auric Dust, Bottle of Airship Oil, Obsidian Shard) from genuinely-free
+overflow mats (Bloodstone Dust) — their item flags are **identical**, quantity is the only signal.
+Drop it and one Ley Line Spark in the bank prices all 25 a recipe needs at 0c, floating ascended
+recipes to the top of the board. Owned mats are also priced free **only** when not TP-obtainable
 (`tpPrice === 0`); pricing owned-but-tradable mats at 0 massively inflates ROI.
 
 **Data sources** (`src/gw2api.ts`, `src/datawars.ts`): official GW2 API for account state and

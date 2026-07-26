@@ -109,6 +109,11 @@ Both ROI tables sort in **SQL**, not via the panel's `sortBy` — the profit col
 formatted `fmt_coin` string (`"1g 23s 4c"`), so a UI sort would order it lexicographically.
 Change the `ORDER BY` if you want a different default sort.
 
+**Always table-qualify the sort column** (`ORDER BY craft_roi.profit DESC`). The panels do
+`fmt_coin(profit) AS profit`, and PostgreSQL resolves a bare `ORDER BY profit` against the
+**output alias first** — which is the `fmt_coin` text, giving a silent lexicographic sort
+(`2g 3s 43c` ranked above `2g 27s 17c`). It looks almost right, which is what makes it nasty.
+
 **Profit is the single rank key** — `pipeline.ts` top-N selection, both table `ORDER BY`s, and
 the headline stat panel. If you change one, change all of them: selection and display sharing
 a key is what stops top-N from picking a different set than the board renders. ROI stays a

@@ -79,8 +79,10 @@ seller's take after the 5% listing + 10% sale fee. Velocity is per day — keep 
 schema changes are additive `ALTER TABLE ... IF NOT EXISTS` / guarded `DO $$` blocks appended
 to the DDL strings, not migration files. `craft_roi` / `craft_roi_learnable` are latest-only
 (TRUNCATE + chunked INSERT in one transaction); `tp_transactions` is accumulate-only (upsert
-by id) so history survives the API's ~90-day window. `fmt_coin(bigint)` is a Postgres function
-created here so dashboard SQL stays DRY.
+by id) so history survives the API's ~90-day window. `account_balance` is likewise
+accumulate-only, one wallet-coin snapshot appended per run — `/v2/account/wallet` returns only
+the *current* balance, so that table is the only balance history that will ever exist; never
+truncate it. `fmt_coin(bigint)` is a Postgres function created here so dashboard SQL stays DRY.
 
 Known gotchas encoded in the code: `/v2/account/recipes` reports only `LearnedFromItem` sheet
 unlocks — never discovery recipes — so `isKnown()` treats every discovery recipe as known and

@@ -241,6 +241,31 @@ export async function writeTransactions(txns: TpTxn[]): Promise<void> {
   }
 }
 
+// Wallet coin snapshots. Accumulate-only, one row per run — the GW2 API exposes only the
+// *current* balance, so history exists solely because we keep sampling it. The dashboard
+// backfills the span before the first snapshot from cumulative TP net (approximate: gold
+// also moves outside the TP), and plots real snapshots from there on.
+const BALANCE_DDL = `
+CREATE TABLE IF NOT EXISTS account_balance (
+  recorded_at timestamptz PRIMARY KEY,
+  coin        bigint NOT NULL
+);
+`;
+
+export async function writeBalance(coin: number): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(BALANCE_DDL);
+    await client.query(
+      `INSERT INTO account_balance (recorded_at, coin) VALUES (now(), $1)
+       ON CONFLICT (recorded_at) DO NOTHING`,
+      [coin],
+    );
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeDb(): Promise<void> {
   await pool.end();
 }

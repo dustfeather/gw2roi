@@ -17,10 +17,34 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "WITH cum AS (SELECT purchased_at, sum(CASE WHEN kind='buy' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS bought, sum(CASE WHEN kind='sell' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) / 10000.0 AS sold, sum(CASE WHEN kind='sell' THEN price*quantity ELSE -price*quantity END) OVER (ORDER BY purchased_at) / 10000.0 AS net FROM tp_transactions) SELECT time, bought, sold, net FROM (SELECT purchased_at AS time, bought, sold, net FROM cum UNION ALL (SELECT now() AS time, bought, sold, net FROM cum ORDER BY purchased_at DESC LIMIT 1)) x ORDER BY time;"
+          "rawSql": "WITH cum AS (SELECT purchased_at, sum(CASE WHEN kind='buy' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) AS bought_c, sum(CASE WHEN kind='sell' THEN price*quantity ELSE 0 END) OVER (ORDER BY purchased_at) AS sold_c, sum(CASE WHEN kind='sell' THEN price*quantity ELSE -price*quantity END) OVER (ORDER BY purchased_at) AS net_c FROM tp_transactions), anchor AS (SELECT b.recorded_at, b.coin, COALESCE((SELECT c.net_c FROM cum c WHERE c.purchased_at <= b.recorded_at ORDER BY c.purchased_at DESC LIMIT 1), 0) AS net_at FROM account_balance b ORDER BY b.recorded_at LIMIT 1), tx AS (SELECT c.purchased_at AS time, c.bought_c, c.sold_c, c.net_c, CASE WHEN c.purchased_at < a.recorded_at THEN a.coin - (a.net_at - c.net_c) END AS balance_c FROM cum c LEFT JOIN anchor a ON true), carry AS (SELECT now() AS time, bought_c, sold_c, net_c, NULL::numeric AS balance_c FROM cum ORDER BY purchased_at DESC LIMIT 1), snap AS (SELECT recorded_at AS time, NULL::numeric, NULL::numeric, NULL::numeric, coin::numeric FROM account_balance) SELECT time, bought_c/10000.0 AS bought, sold_c/10000.0 AS sold, net_c/10000.0 AS net, balance_c/10000.0 AS balance FROM (SELECT * FROM tx UNION ALL SELECT * FROM carry UNION ALL SELECT * FROM snap) x ORDER BY time;"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "none", "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } } },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "bought" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "sold" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "net" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "balance" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "#FFFFFF" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 }
+            ]
+          }
+        ]
+      },
       "options": { "tooltip": { "mode": "multi", "sort": "none" }, "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } }
     },
     {

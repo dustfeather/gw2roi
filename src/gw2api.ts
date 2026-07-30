@@ -130,6 +130,14 @@ export async function fetchOwnedDropOnlyMats(): Promise<Map<number, number>> {
   return dropOnly;
 }
 
+// Current account coin balance in copper (wallet currency id 1). Needs the `wallet` scope.
+// Returns null when the key lacks the scope or the wallet omits coin, so callers can skip
+// writing rather than record a bogus 0 balance.
+export async function fetchWalletCoin(): Promise<number | null> {
+  const wallet = await getJson<{ id: number; value: number }[]>("/v2/account/wallet", true);
+  return wallet.find((c) => c.id === 1)?.value ?? null;
+}
+
 export interface TpTxn {
   id: number;
   item_id: number;

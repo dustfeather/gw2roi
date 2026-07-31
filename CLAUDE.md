@@ -121,7 +121,9 @@ Dashboard edits: commit and push to `main` immediately, no confirmation needed.
 ## Grafana
 
 Dashboards live in `k8s/grafana/dashboards/` and are pushed with
-`scripts/provision-grafana.sh` (never by CI). `k8s/grafana/dashboard.yaml` is an older
+`scripts/provision-grafana.sh` (never by CI). The script does **not** source `.env` — run it as
+`set -a && . ./.env && set +a && bash scripts/provision-grafana.sh`, or it dies on
+`missing GRAFANA_API_KEY` even though the key is right there in `.env`. `k8s/grafana/dashboard.yaml` is an older
 ConfigMap-provisioning variant kept in sync but not the one actually served.
 
 Both ROI tables sort in **SQL**, not via the panel's `sortBy` — the profit column is a

@@ -70,6 +70,13 @@ DO $$ BEGIN
     ALTER TABLE craft_roi RENAME COLUMN sell_sold_1d TO sell_sold_day;
   END IF;
 END $$;
+-- owned-stock discount (2026-07-31): craft_cost/profit/roi_pct stay market-true, the net_*
+-- columns re-cost the tree with mats already in the bank priced at 0 coin. net_profit is the
+-- board's rank key.
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS out_of_pocket bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS owned_value   bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS net_profit    bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi ADD COLUMN IF NOT EXISTS net_roi_pct   double precision NOT NULL DEFAULT 0;
 `;
 
 // Learnable table: qualified-but-not-yet-known recipes. Same shape as craft_roi plus
@@ -101,6 +108,11 @@ DO $$ BEGIN
     ALTER TABLE craft_roi_learnable RENAME COLUMN sell_sold_1d TO sell_sold_day;
   END IF;
 END $$;
+-- owned-stock discount (2026-07-31), see craft_roi above.
+ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS out_of_pocket bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS owned_value   bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS net_profit    bigint NOT NULL DEFAULT 0;
+ALTER TABLE craft_roi_learnable ADD COLUMN IF NOT EXISTS net_roi_pct   double precision NOT NULL DEFAULT 0;
 `;
 
 const COLS = [
@@ -112,6 +124,10 @@ const COLS = [
   "list_revenue",
   "profit",
   "roi_pct",
+  "out_of_pocket",
+  "owned_value",
+  "net_profit",
+  "net_roi_pct",
   "instant_sell_revenue",
   "sell_price",
   "buy_price",
@@ -130,6 +146,10 @@ const LEARN_COLS = [
   "list_revenue",
   "profit",
   "roi_pct",
+  "out_of_pocket",
+  "owned_value",
+  "net_profit",
+  "net_roi_pct",
   "instant_sell_revenue",
   "sell_price",
   "buy_price",
@@ -149,6 +169,10 @@ function values(r: RoiRow, cols: readonly string[]): (number | string)[] {
     list_revenue: r.list_revenue,
     profit: r.profit,
     roi_pct: r.roi_pct,
+    out_of_pocket: r.out_of_pocket,
+    owned_value: r.owned_value,
+    net_profit: r.net_profit,
+    net_roi_pct: r.net_roi_pct,
     instant_sell_revenue: r.instant_sell_revenue,
     sell_price: r.sell_price,
     buy_price: r.buy_price,

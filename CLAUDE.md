@@ -50,6 +50,14 @@ sell_price, craft-it, coin-vendor, spend-held-stock)`; `visited` guards recipe c
 no obtainable price returns `null`, which disqualifies the entire branch — this null-propagation
 is the main correctness constraint.
 
+**Every recipe is costed twice.** The market-true model above produces `craft_cost` / `profit` /
+`roi_pct`; a twin model with `creditOwned: true` prices anything in `heldMats` (all bank +
+material-storage stock, tradable included) at 0 coin and produces `out_of_pocket` / `owned_value`
+/ `net_profit` / `net_roi_pct` (§5). So four models and **four memo maps** in `pipeline.ts` —
+known/learnable × market/owned. Never share a memo across any two of them. The `creditOwned`
+branch short-circuits before the craft recursion, which is what makes the discount recursive:
+owning an intermediate zeroes its whole subtree.
+
 `need` is the **quantity demanded**, threaded down the tree (`craftCost` multiplies by
 `ceil(need / output_item_count)`) and part of the memo key. TP/vendor supply is unlimited so
 `need` never constrains it; held stock is finite, so a drop-only mat is only usable while
@@ -125,10 +133,11 @@ Change the `ORDER BY` if you want a different default sort.
 **output alias first** — which is the `fmt_coin` text, giving a silent lexicographic sort
 (`2g 3s 43c` ranked above `2g 27s 17c`). It looks almost right, which is what makes it nasty.
 
-**Profit is the single rank key** — `pipeline.ts` top-N selection, both table `ORDER BY`s, and
-the headline stat panel. If you change one, change all of them: selection and display sharing
-a key is what stops top-N from picking a different set than the board renders. ROI stays a
-gate (`GATE_MIN_ROI_PCT`) and a displayed figure, never a rank key.
+**`net_profit` is the single rank key** — `pipeline.ts` top-N selection, both table `ORDER BY`s,
+and the headline stat panel. If you change one, change all of them: selection and display sharing
+a key is what stops top-N from picking a different set than the board renders. Market-true
+`profit` is still shown per row but does **not** rank. ROI stays a gate (`GATE_MIN_ROI_PCT`,
+evaluated on the market-true figures) and a displayed figure, never a rank key.
 
 The two ROI tables carry **no `$__timeFilter`, deliberately** (decided 2026-07-25). `craft_roi`
 is latest-only — one TRUNCATE+INSERT per run, so every row shares a single `updated_at` and

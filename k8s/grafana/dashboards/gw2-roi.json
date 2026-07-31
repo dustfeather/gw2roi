@@ -50,14 +50,14 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Best profit (per craft)",
+      "title": "Best net profit (per craft)",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT fmt_coin(max(profit)) AS value FROM craft_roi;"
+          "rawSql": "SELECT fmt_coin(max(net_profit)) AS value FROM craft_roi;"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
@@ -86,14 +86,14 @@
     {
       "id": 4,
       "type": "table",
-      "title": "Top craftable items by profit (craft-and-list)",
+      "title": "Top craftable items by net profit (craft-and-list)",
       "gridPos": { "h": 28, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY craft_roi.profit DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(net_profit) || ' (' || CASE WHEN out_of_pocket > 0 THEN round(net_roi_pct::numeric, 1)::text || '%' ELSE 'free' END || ')' AS net, CASE WHEN owned_value > 0 THEN fmt_coin(owned_value) ELSE '-' END AS from_stock, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS market, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, output_item_id AS item_id FROM craft_roi ORDER BY craft_roi.net_profit DESC;"
         }
       ],
       "fieldConfig": {
@@ -127,14 +127,14 @@
     {
       "id": 6,
       "type": "table",
-      "title": "Recipes to buy (unlearned sheets), by profit",
+      "title": "Recipes to buy (unlearned sheets), by net profit",
       "gridPos": { "h": 24, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "postgres", "uid": "gw2-postgres" },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT output_item_name AS item, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS profit, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') AS link FROM craft_roi_learnable ORDER BY craft_roi_learnable.profit DESC;"
+          "rawSql": "SELECT output_item_name AS item, fmt_coin(net_profit) || ' (' || CASE WHEN out_of_pocket > 0 THEN round(net_roi_pct::numeric, 1)::text || '%' ELSE 'free' END || ')' AS net, CASE WHEN owned_value > 0 THEN fmt_coin(owned_value) ELSE '-' END AS from_stock, fmt_coin(profit) || ' (' || round(roi_pct::numeric, 1) || '%)' AS market, sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd' AS demand, 'https://wiki.guildwars2.com/wiki/Recipe:%20' || replace(replace(output_item_name, '''', '%27'), ' ', '%20') AS link FROM craft_roi_learnable ORDER BY craft_roi_learnable.net_profit DESC;"
         }
       ],
       "fieldConfig": {

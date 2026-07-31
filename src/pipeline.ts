@@ -4,7 +4,7 @@ import {
   fetchAllRecipeIds,
   fetchDisciplineRatings,
   fetchItemNames,
-  fetchOwnedDropOnlyMats,
+  fetchOwnedMats,
   fetchRecipes,
   fetchUnlockedRecipeIds,
   type Recipe,
@@ -52,16 +52,16 @@ export interface RunResult {
 
 export async function run(): Promise<RunResult> {
   // 1-2. Account state + recipe universe.
-  const [ratings, unlocked, allIds, ownedFreeMats] = await Promise.all([
+  const [ratings, unlocked, allIds, owned] = await Promise.all([
     fetchDisciplineRatings(),
     fetchUnlockedRecipeIds(),
     fetchAllRecipeIds(),
-    fetchOwnedDropOnlyMats(),
+    fetchOwnedMats(),
   ]);
   console.log(
     `disciplines=${[...ratings].map(([d, r]) => `${d}:${r}`).join(",")} ` +
       `unlocked=${unlocked.size} total_recipes=${allIds.length} ` +
-      `owned_free_mats=${ownedFreeMats.size}`,
+      `owned_free_mats=${owned.dropOnly.size} held_mats=${owned.held.size}`,
   );
 
   const allRecipes = await fetchRecipes(allIds);
@@ -87,16 +87,24 @@ export async function run(): Promise<RunResult> {
 
   // 5. Cost models. Known-table costing may only craft KNOWN intermediates; the learnable
   // table lets chains resolve through any qualified recipe (best-case for a recipe to learn).
-  const ownedMats = ownedFreeMats;
-  const modelKnown: CostModel = { tp, craftMap: toCraftMap(known), ownedMats };
-  const modelAll: CostModel = { tp, craftMap: toCraftMap(qualified), ownedMats };
+  // Each set also gets a `creditOwned` twin that prices held stock at 0 coin, feeding the
+  // out-of-pocket / net_profit figures (§5). Four models, four memos — never share one.
+  const ownedMats = owned.dropOnly;
+  const heldMats = owned.held;
+  const knownMap = toCraftMap(known);
+  const allMap = toCraftMap(qualified);
+  const modelKnown: CostModel = { tp, craftMap: knownMap, ownedMats, heldMats };
+  const modelAll: CostModel = { tp, craftMap: allMap, ownedMats, heldMats };
+  const modelKnownOwned: CostModel = { ...modelKnown, creditOwned: true };
+  const modelAllOwned: CostModel = { ...modelAll, creditOwned: true };
 
   // 6-8. Cost, ROI, gates for each set.
   const passKnown: RoiRow[] = [];
   let scoredKnown = 0;
   const memoKnown = new Map<string, number | null>();
+  const memoKnownOwned = new Map<string, number | null>();
   for (const r of known) {
-    const s = scoreRecipe(modelKnown, r, memoKnown);
+    const s = scoreRecipe(modelKnown, modelKnownOwned, r, memoKnown, memoKnownOwned);
     if (!s) continue;
     scoredKnown++;
     if (s.passes) passKnown.push(s.row);
@@ -105,8 +113,9 @@ export async function run(): Promise<RunResult> {
   const passLearn: RoiRow[] = [];
   let scoredLearn = 0;
   const memoLearn = new Map<string, number | null>();
+  const memoLearnOwned = new Map<string, number | null>();
   for (const r of learnable) {
-    const s = scoreRecipe(modelAll, r, memoLearn);
+    const s = scoreRecipe(modelAll, modelAllOwned, r, memoLearn, memoLearnOwned);
     if (!s) continue;
     scoredLearn++;
     if (s.passes) {
@@ -119,16 +128,18 @@ export async function run(): Promise<RunResult> {
       `learnable: scored=${scoredLearn} passing=${passLearn.length}`,
   );
 
-  // 9. Rank + take top-N by absolute PROFIT (copper per craft), not ROI percent.
-  // ROI alone favours cheap crafts: a 5c -> 15c item is 200% ROI but 10c a pop, while a
-  // 3g -> 4g craft is 33% ROI and worth 300x more per craft. Selection and display must
-  // use the same key, otherwise top-N silently picks a different set than the board shows.
+  // 9. Rank + take top-N by absolute NET PROFIT (copper per craft after spending held stock),
+  // not ROI percent. ROI alone favours cheap crafts: a 5c -> 15c item is 200% ROI but 10c a
+  // pop, while a 3g -> 4g craft is 33% ROI and worth 300x more per craft. Net rather than raw
+  // profit so mats already in the bank give a recipe an edge over an otherwise-equal one.
+  // Selection and display must use the same key, otherwise top-N silently picks a different
+  // set than the board shows — see the ORDER BYs in k8s/grafana/dashboards/.
   // ROI is still gated on (GATE_MIN_ROI_PCT) and still displayed alongside profit.
-  // Learnable stays free-first (DISCOVER before BUY), then profit.
-  passKnown.sort((a, b) => b.profit - a.profit);
+  // Learnable stays free-first (DISCOVER before BUY), then net profit.
+  passKnown.sort((a, b) => b.net_profit - a.net_profit);
   passLearn.sort((a, b) => {
     if (a.learn_method !== b.learn_method) return a.learn_method === "DISCOVER" ? -1 : 1;
-    return b.profit - a.profit;
+    return b.net_profit - a.net_profit;
   });
   const topKnown = passKnown.slice(0, config.topN);
   const topLearn = passLearn.slice(0, config.topN);

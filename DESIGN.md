@@ -45,14 +45,27 @@ For each ingredient, `cost = min( buy-on-TP, craft-it, buy-from-coin-vendor, spe
 - **Disqualify the whole recipe** if any leaf is `Currency`, `GuildUpgrade`, karma, or otherwise not obtainable for gold/TP — including a drop-only mat held in insufficient quantity.
 - TP fee: **15%** on sale (`net = 0.85 × sale`), fixed in code.
 
+This model is **market-true**: it prices what the ingredients are worth, not what they cost *you* today. Mats already sitting in the bank are still priced at their TP `sell_price` here — pricing an owned-but-tradable mat at 0 would inflate ROI, because selling it instead is a real alternative. The owned-stock discount lives in §5 as a separate figure.
+
 ---
 
 ## 5. ROI ranking + shown figures
 
-Primary rank = **Craft-and-list** ROI:
-- **Cost** = ingredients acquired by instant-buy (each at its `sell_price`).
-- **Revenue** = output sold by *listing* = `sell_price × 0.85`.
-- **ROI** = (revenue − cost) / cost. Rank **desc**.
+Two costings of the same tree, per row:
+
+**Market-true (§4)** — drives the gates and the ROI figure:
+- **Cost** (`craft_cost`) = ingredients acquired by instant-buy (each at its `sell_price`).
+- **Revenue** (`list_revenue`) = output sold by *listing* = `sell_price × 0.85`.
+- **Profit** = revenue − cost; **ROI** = profit / cost.
+
+**Out-of-pocket** — the same recursion re-run with a `creditOwned` cost model, where any item the account holds in at least the demanded quantity costs **0 coin**, tradable or not. Owning a mid-tree intermediate short-circuits its whole subtree, so the discount is recursive by construction:
+- **`out_of_pocket`** = coin actually spent per output item.
+- **`owned_value`** = `craft_cost − out_of_pocket` — market value of the held mats consumed.
+- **`net_profit`** = `list_revenue − out_of_pocket`; **`net_roi_pct`** = net_profit / out_of_pocket (capped, undefined when nothing is spent).
+
+**Rank = `net_profit` desc**, so a recipe whose mats are already in the bank outranks an otherwise-equal one. The gates (§6) deliberately keep judging the market-true figures: owning mats reorders recipes that already clear the bar, it never floats a break-even recipe onto the board.
+
+Held stock is credited **per row independently** — the same 25 Mithril Ore discounts every recipe that consumes it. The board ranks single crafts, not a joint plan, so this is an edge signal, not a budget.
 
 Also displayed per row (context, not ranking):
 - **Instant-flip floor** = output dumped into buy order = `buy_price × 0.85`.

@@ -104,17 +104,27 @@ interface AccountSlot {
   count: number;
 }
 
-// Item ids the account currently holds (material storage + bank) that are drop-only —
-// flagged NoSell or AccountBound, i.e. can't be bought off the TP. These join the bundled
-// free-mat table so recipes consuming mats the player already owns are no longer disqualified.
-export async function fetchOwnedDropOnlyMats(): Promise<Map<number, number>> {
+export interface OwnedMats {
+  // Everything held in material storage + bank, id -> units. Used only to discount the
+  // out-of-pocket figure (§5); never feeds the true cost model, where pricing an
+  // owned-but-tradable mat at 0 would inflate ROI.
+  held: Map<number, number>;
+  // The drop-only subset: flagged NoSell or AccountBound, i.e. can't be bought off the TP.
+  // These join the bundled free-mat table so recipes consuming mats the player already
+  // owns are no longer disqualified.
+  dropOnly: Map<number, number>;
+}
+
+// Item ids + counts the account currently holds (material storage + bank), split into the
+// full holding and the drop-only subset — both come from the same two endpoints, one pass.
+export async function fetchOwnedMats(): Promise<OwnedMats> {
   const [materials, bank] = await Promise.all([
     getJson<AccountSlot[]>("/v2/account/materials", true),
     getJson<(AccountSlot | null)[]>("/v2/account/bank", true),
   ]);
 
-  // Counts, not just ids: these mats can't be TP- or vendor-bought, so the cost model may only
-  // spend as many as are actually on hand (§4). Same item can occupy several bank slots.
+  // Counts, not just ids: drop-only mats can't be TP- or vendor-bought, so the cost model may
+  // only spend as many as are actually on hand (§4). Same item can occupy several bank slots.
   const held = new Map<number, number>();
   for (const s of [...materials, ...bank]) {
     if (s && s.id !== null && s.count > 0) held.set(s.id, (held.get(s.id) ?? 0) + s.count);
@@ -127,7 +137,7 @@ export async function fetchOwnedDropOnlyMats(): Promise<Map<number, number>> {
       dropOnly.set(it.id, held.get(it.id)!);
     }
   }
-  return dropOnly;
+  return { held, dropOnly };
 }
 
 // Current account coin balance in copper (wallet currency id 1). Needs the `wallet` scope.

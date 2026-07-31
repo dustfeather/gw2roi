@@ -11,6 +11,13 @@ export interface CostModel {
   craftMap: Map<number, Recipe[]>;
   // drop-only mats the account already holds (bank/material-storage scan) -> units on hand.
   ownedMats: Map<number, number>;
+  // EVERYTHING the account holds (bank + material storage), tradable included -> units on hand.
+  // Only consulted when `creditOwned` is set.
+  heldMats: Map<number, number>;
+  // Out-of-pocket mode (§5): a leaf already held in sufficient quantity costs 0 coin regardless
+  // of its market price. This measures cash spent, NOT economic cost — a model with this set
+  // must never feed craft_cost/roi_pct or the gates, only the net_* figures.
+  creditOwned?: boolean;
 }
 
 // Ingredients acquired by instant-buy at seller's ask (sell_price).
@@ -32,6 +39,13 @@ export function costOf(
   const key = `${itemId}:${need}`;
   const cached = memo.get(key);
   if (cached !== undefined) return cached;
+
+  // Out-of-pocket mode: stock already in the account is free to *acquire*, whatever it is worth.
+  // Short-circuit — nothing beats 0, and skipping the craft recursion keeps this pass cheap.
+  if (model.creditOwned && (model.heldMats.get(itemId) ?? 0) >= need) {
+    memo.set(key, 0);
+    return 0;
+  }
 
   const candidates: number[] = [];
 

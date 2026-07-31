@@ -17,6 +17,13 @@ export interface RoiRow {
   list_revenue: number; // sell_price * keep, per single output item
   profit: number;
   roi_pct: number;
+  // owned-stock discount (§5): same tree re-costed with mats already in the account priced at
+  // 0 coin. `net_profit` is the board's rank key; craft_cost/profit/roi_pct stay market-true
+  // so the gates keep judging real economics.
+  out_of_pocket: number; // coin actually spent per output item after spending held stock
+  owned_value: number; // craft_cost - out_of_pocket: market value of the held mats consumed
+  net_profit: number; // list_revenue - out_of_pocket
+  net_roi_pct: number;
   // also-displayed rows
   instant_sell_revenue: number; // dump output to buy orders: buy_price * keep
   // liquidity / velocity (of the OUTPUT item)
@@ -34,10 +41,14 @@ export interface Scored {
 
 // Build ROI figures for one candidate recipe. Returns null if ingredients unobtainable
 // or the output has no TP data.
+// `model` is the market-true cost model; `modelOwned` is the same model with `creditOwned`
+// set, and must carry its OWN memo — the two price the same items differently.
 export function scoreRecipe(
   model: CostModel,
+  modelOwned: CostModel,
   r: Recipe,
   memoInstant: Map<string, number | null>,
+  memoOwned: Map<string, number | null>,
 ): Scored | null {
   const out = model.tp.get(r.output_item_id);
   if (!out) return null;
@@ -56,6 +67,17 @@ export function scoreRecipe(
   const profit = listRevenue - craftCostPer;
   const roiPct = (profit / craftCostPer) * 100;
 
+  // Same tree, mats already in the account priced at 0 coin. It can only ever be cheaper than
+  // the market-true cost, and it can't newly disqualify a branch (owned stock only *adds* a
+  // candidate), but clamp anyway so a null never silently reads as "free".
+  const oop = craftCost(modelOwned, r, 1, memoOwned);
+  const outOfPocket = oop === null ? craftCostPer : Math.min(oop, craftCostPer);
+  const ownedValue = craftCostPer - outOfPocket;
+  const netProfit = listRevenue - outOfPocket;
+  // Fully-owned ingredients means zero cash in, i.e. undefined ROI. Cap rather than emit
+  // Infinity, which has no useful ordering on the board.
+  const netRoiPct = outOfPocket > 0 ? (netProfit / outOfPocket) * 100 : 999999;
+
   // sell_sold_day is a per-day rate, so this is in days regardless of the window.
   const daysToSell =
     out.sell_sold_day > 0 ? out.sell_quantity / out.sell_sold_day : Infinity;
@@ -71,6 +93,10 @@ export function scoreRecipe(
     list_revenue: Math.round(listRevenue),
     profit: Math.round(profit),
     roi_pct: roiPct,
+    out_of_pocket: Math.round(outOfPocket),
+    owned_value: Math.round(ownedValue),
+    net_profit: Math.round(netProfit),
+    net_roi_pct: netRoiPct,
     instant_sell_revenue: Math.round(out.buy_price * keep),
     sell_price: out.sell_price,
     buy_price: out.buy_price,
@@ -79,6 +105,9 @@ export function scoreRecipe(
     days_to_sell: Number.isFinite(daysToSell) ? Math.round(daysToSell * 100) / 100 : 9999,
   };
 
+  // Gates judge market-true economics only (§6) — deliberately NOT net_profit/net_roi_pct.
+  // Owning mats must reorder recipes that already clear the bar, never float a break-even
+  // recipe onto the board just because its ingredients happen to be in the bank.
   const g = config.gates;
   const passes =
     out.sell_price > 0 && // output sellable

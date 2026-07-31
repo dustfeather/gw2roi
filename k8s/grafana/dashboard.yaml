@@ -79,7 +79,7 @@ data:
             {
               "refId": "A",
               "format": "table",
-              "rawSql": "SELECT output_item_name AS item, round(roi_pct::numeric, 1) AS roi_pct, round(profit / 10000.0, 2) AS profit_gold, round(craft_cost / 10000.0, 2) AS craft_cost_gold, round(list_revenue / 10000.0, 2) AS list_revenue_gold, round(instant_sell_revenue / 10000.0, 2) AS instant_sell_gold, (sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd') AS demand FROM craft_roi ORDER BY profit DESC;"
+              "rawSql": "SELECT output_item_name AS item, round(roi_pct::numeric, 1) AS roi_pct, round(net_profit / 10000.0, 2) AS net_profit_gold, round(owned_value / 10000.0, 2) AS from_stock_gold, round(profit / 10000.0, 2) AS profit_gold, round(craft_cost / 10000.0, 2) AS craft_cost_gold, round(list_revenue / 10000.0, 2) AS list_revenue_gold, round(instant_sell_revenue / 10000.0, 2) AS instant_sell_gold, (sell_sold_day || '/d in ' || round(days_to_sell::numeric, 2) || 'd') AS demand FROM craft_roi ORDER BY craft_roi.net_profit DESC;"
             }
           ],
           "fieldConfig": {

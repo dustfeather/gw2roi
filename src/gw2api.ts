@@ -19,16 +19,22 @@ async function getJson<T>(path: string, auth: boolean): Promise<T> {
     const res = await fetch(url, {
       headers: auth ? { Authorization: `Bearer ${config.arenaNetKey}` } : {},
     });
-    // Retry rate-limits (429) and transient server errors (5xx) with linear backoff.
-    if (res.status === 429 || res.status >= 500) {
+    // Retry rate-limits (429), transient server errors (5xx), and the 400s ArenaNet
+    // returns on authenticated account endpoints when its backend times out — the body
+    // is ErrTimeout/ErrBadData, not a malformed request, so the same call succeeds later.
+    // Unauthenticated 400s (bad ids) are genuine and still fail fast.
+    if (res.status === 429 || res.status >= 500 || (res.status === 400 && auth)) {
       const backoff = 1000 * (attempt + 1);
       await new Promise((r) => setTimeout(r, backoff));
       continue;
     }
-    if (!res.ok) throw new Error(`gw2 ${res.status} ${res.statusText} for ${url}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`gw2 ${res.status} ${res.statusText} for ${url} ${body.slice(0, 200)}`);
+    }
     return (await res.json()) as T;
   }
-  throw new Error(`gw2 rate-limited after retries: ${url}`);
+  throw new Error(`gw2 still failing after retries (429/5xx/authed 400): ${url}`);
 }
 
 // Fetch every definition for a big id list, chunked by 200.

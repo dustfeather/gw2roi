@@ -12,6 +12,7 @@ import {
 import { fetchTpData } from "./datawars.ts";
 import type { CostModel } from "./cost.ts";
 import { scoreRecipe, type RoiRow } from "./roi.ts";
+import { phase } from "./timing.ts";
 
 // Disciplines are trained high enough to make this recipe (ignores whether it's learned yet).
 // Must actually HAVE the discipline: a missing discipline must fail even when min_rating is 0,
@@ -52,19 +53,21 @@ export interface RunResult {
 
 export async function run(): Promise<RunResult> {
   // 1-2. Account state + recipe universe.
-  const [ratings, unlocked, allIds, owned] = await Promise.all([
-    fetchDisciplineRatings(),
-    fetchUnlockedRecipeIds(),
-    fetchAllRecipeIds(),
-    fetchOwnedMats(),
-  ]);
+  const [ratings, unlocked, allIds, owned] = await phase("account", () =>
+    Promise.all([
+      fetchDisciplineRatings(),
+      fetchUnlockedRecipeIds(),
+      fetchAllRecipeIds(),
+      fetchOwnedMats(),
+    ]),
+  );
   console.log(
     `disciplines=${[...ratings].map(([d, r]) => `${d}:${r}`).join(",")} ` +
       `unlocked=${unlocked.size} total_recipes=${allIds.length} ` +
       `owned_free_mats=${owned.dropOnly.size} held_mats=${owned.held.size}`,
   );
 
-  const allRecipes = await fetchRecipes(allIds);
+  const allRecipes = await phase("recipes", () => fetchRecipes(allIds));
 
   // Two candidate sets, both bounded by trained disciplines:
   //   known     = craftable right now (primary table)
@@ -82,7 +85,7 @@ export async function run(): Promise<RunResult> {
   }
 
   // 4. Bulk TP prices + velocity.
-  const tp = await fetchTpData([...priceIds]);
+  const tp = await phase("tp_prices", () => fetchTpData([...priceIds]));
   console.log(`priced_items=${tp.size}/${priceIds.size}`);
 
   // 5. Cost models. Known-table costing may only craft KNOWN intermediates; the learnable
@@ -103,26 +106,30 @@ export async function run(): Promise<RunResult> {
   let scoredKnown = 0;
   const memoKnown = new Map<string, number | null>();
   const memoKnownOwned = new Map<string, number | null>();
-  for (const r of known) {
-    const s = scoreRecipe(modelKnown, modelKnownOwned, r, memoKnown, memoKnownOwned);
-    if (!s) continue;
-    scoredKnown++;
-    if (s.passes) passKnown.push(s.row);
-  }
+  await phase("score_known", () => {
+    for (const r of known) {
+      const s = scoreRecipe(modelKnown, modelKnownOwned, r, memoKnown, memoKnownOwned);
+      if (!s) continue;
+      scoredKnown++;
+      if (s.passes) passKnown.push(s.row);
+    }
+  });
 
   const passLearn: RoiRow[] = [];
   let scoredLearn = 0;
   const memoLearn = new Map<string, number | null>();
   const memoLearnOwned = new Map<string, number | null>();
-  for (const r of learnable) {
-    const s = scoreRecipe(modelAll, modelAllOwned, r, memoLearn, memoLearnOwned);
-    if (!s) continue;
-    scoredLearn++;
-    if (s.passes) {
-      s.row.learn_method = learnMethod(r);
-      passLearn.push(s.row);
+  await phase("score_learnable", () => {
+    for (const r of learnable) {
+      const s = scoreRecipe(modelAll, modelAllOwned, r, memoLearn, memoLearnOwned);
+      if (!s) continue;
+      scoredLearn++;
+      if (s.passes) {
+        s.row.learn_method = learnMethod(r);
+        passLearn.push(s.row);
+      }
     }
-  }
+  });
   console.log(
     `known: scored=${scoredKnown} passing=${passKnown.length} | ` +
       `learnable: scored=${scoredLearn} passing=${passLearn.length}`,
@@ -145,9 +152,9 @@ export async function run(): Promise<RunResult> {
   const topLearn = passLearn.slice(0, config.topN);
 
   // Resolve output item names for both top-N sets (gw2efficiency + wiki links).
-  const names = await fetchItemNames([
-    ...new Set([...topKnown, ...topLearn].map((r) => r.output_item_id)),
-  ]);
+  const names = await phase("item_names", () =>
+    fetchItemNames([...new Set([...topKnown, ...topLearn].map((r) => r.output_item_id))]),
+  );
   for (const r of [...topKnown, ...topLearn]) {
     r.output_item_name = names.get(r.output_item_id) ?? "";
   }

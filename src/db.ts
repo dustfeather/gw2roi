@@ -6,17 +6,34 @@ import type { TpTxn } from "./gw2api.ts";
 
 const { Pool } = pg;
 
+// connectionTimeoutMillis matters here: without it a wedged DNS/TCP path hangs the connect
+// indefinitely, and the pod's deadline (not an error) is what ends the run — no stack, no
+// clue. 10s is far above a healthy in-cluster connect.
 const pool = new Pool(
   config.databaseUrl
-    ? { connectionString: config.databaseUrl }
+    ? { connectionString: config.databaseUrl, connectionTimeoutMillis: 10_000 }
     : {
         host: config.pg.host,
         port: config.pg.port,
         user: config.pg.user,
         password: config.pg.password,
         database: config.pg.database,
+        connectionTimeoutMillis: 10_000,
       },
 );
+
+// Preflight the connection before the pipeline runs. Every write happens at the END of a
+// ~12 min run, so a CoreDNS blip (`getaddrinfo ENOTFOUND` on PGHOST, seen 2026-08-04 and
+// 2026-08-08) otherwise burns the whole pipeline before anyone learns the DB was gone —
+// then burns it twice more through backoffLimit. Failing in seconds makes the retry cheap.
+export async function pingDb(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT 1");
+  } finally {
+    client.release();
+  }
+}
 
 // Shared copper -> "Xg Ys Zc" formatter so panel SQL stays DRY (one call, not a
 // repeated div/mod expression per money column).

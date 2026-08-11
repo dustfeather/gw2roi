@@ -6,6 +6,7 @@
   "description": "Ranks top-N craftable GW2 items by profit into Grafana. Hourly k3s CronJob.",
   "scripts": {
     "start": "bun run src/index.ts",
+    "seed-cache": "bun run scripts/seed-cache.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

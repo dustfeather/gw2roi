@@ -69,11 +69,20 @@ export interface Recipe {
 export interface Character {
   name: string;
   crafting?: { discipline: string; rating: number; active: boolean }[];
+  // Equipped bags and their contents. Present because the API key carries the `inventories`
+  // scope — this arrives in the same response as `crafting`, at no extra request.
+  bags?: ({ id: number; size: number; inventory: (AccountSlot | null)[] } | null)[];
+}
+
+// One /v2/characters read serves both discipline ratings and bag contents. Kept as a single
+// call deliberately: the response already contains everything, and splitting it would buy a
+// second request for data we were handed the first time.
+export async function fetchCharacters(): Promise<Character[]> {
+  return getJson<Character[]>("/v2/characters?ids=all", true);
 }
 
 // Max known rating per discipline across all account characters.
-export async function fetchDisciplineRatings(): Promise<Map<string, number>> {
-  const chars = await getJson<Character[]>("/v2/characters?ids=all", true);
+export function disciplineRatings(chars: Character[]): Map<string, number> {
   const ratings = new Map<string, number>();
   for (const c of chars) {
     for (const cr of c.crafting ?? []) {
@@ -102,17 +111,21 @@ export async function fetchRecipes(
   return getBulk<Recipe>("/v2/recipes", ids, onPage);
 }
 
-interface Item {
+// Only the fields the pipeline reads. The full /v2/items payload averages ~950 bytes an
+// item; the cache stores what comes back, but nothing downstream depends on the rest.
+export interface Item {
   id: number;
   name: string;
+  flags?: string[];
 }
 
-// Item id -> display name. Used for the top-N output items only (gw2efficiency links).
-export async function fetchItemNames(ids: number[]): Promise<Map<number, string>> {
-  const items = await getBulk<Item>("/v2/items", ids);
-  const m = new Map<number, string>();
-  for (const it of items) m.set(it.id, it.name);
-  return m;
+// Item definitions, chunked by 200. Cached in item_defs the same way recipes are, so a warm
+// run fetches only unseen ids plus a refresh slice — see loadItemDefs() in pipeline.ts.
+export async function fetchItems(
+  ids: number[],
+  onPage?: (page: Item[]) => Promise<void>,
+): Promise<Item[]> {
+  return getBulk<Item>("/v2/items", ids, onPage);
 }
 
 interface AccountSlot {
@@ -121,9 +134,9 @@ interface AccountSlot {
 }
 
 export interface OwnedMats {
-  // Everything held in material storage + bank, id -> units. Used only to discount the
-  // out-of-pocket figure (§5); never feeds the true cost model, where pricing an
-  // owned-but-tradable mat at 0 would inflate ROI.
+  // Everything the account holds, id -> units. Used only to discount the out-of-pocket
+  // figure (§5); never feeds the true cost model, where pricing an owned-but-tradable mat
+  // at 0 would inflate ROI.
   held: Map<number, number>;
   // The drop-only subset: flagged NoSell or AccountBound, i.e. can't be bought off the TP.
   // These join the bundled free-mat table so recipes consuming mats the player already
@@ -131,29 +144,34 @@ export interface OwnedMats {
   dropOnly: Map<number, number>;
 }
 
-// Item ids + counts the account currently holds (material storage + bank), split into the
-// full holding and the drop-only subset — both come from the same two endpoints, one pass.
-export async function fetchOwnedMats(): Promise<OwnedMats> {
-  const [materials, bank] = await Promise.all([
+// Item ids + counts the account currently holds. Four places, because a mid-chain
+// intermediate is exactly the thing that does NOT sit in material storage: you craft it and
+// it lands in the crafting character's bags, where it stayed invisible to this bot until
+// 2026-08-11. `chars` is the response already fetched for discipline ratings, so character
+// bags cost no extra request; only shared inventory slots add one.
+export async function fetchHeldMats(chars: Character[]): Promise<Map<number, number>> {
+  const [materials, bank, shared] = await Promise.all([
     getJson<AccountSlot[]>("/v2/account/materials", true),
     getJson<(AccountSlot | null)[]>("/v2/account/bank", true),
+    getJson<(AccountSlot | null)[]>("/v2/account/inventories", true),
   ]);
 
-  // Counts, not just ids: drop-only mats can't be TP- or vendor-bought, so the cost model may
-  // only spend as many as are actually on hand (§4). Same item can occupy several bank slots.
-  const held = new Map<number, number>();
-  for (const s of [...materials, ...bank]) {
-    if (s && s.id !== null && s.count > 0) held.set(s.id, (held.get(s.id) ?? 0) + s.count);
-  }
-
-  const items = await getBulk<{ id: number; flags: string[] }>("/v2/items", [...held.keys()]);
-  const dropOnly = new Map<number, number>();
-  for (const it of items) {
-    if (it.flags?.includes("NoSell") || it.flags?.includes("AccountBound")) {
-      dropOnly.set(it.id, held.get(it.id)!);
+  // Bag contents only — the bag item itself is equipped, not stock we could consume.
+  const bagSlots: (AccountSlot | null)[] = [];
+  for (const c of chars) {
+    for (const bag of c.bags ?? []) {
+      if (bag) bagSlots.push(...(bag.inventory ?? []));
     }
   }
-  return { held, dropOnly };
+
+  // Counts, not just ids: drop-only mats can't be TP- or vendor-bought, so the cost model may
+  // only spend as many as are actually on hand (§4). The same item can occupy many slots
+  // across storage, bank, shared slots and several characters' bags — all of them add up.
+  const held = new Map<number, number>();
+  for (const s of [...materials, ...bank, ...shared, ...bagSlots]) {
+    if (s && s.id !== null && s.count > 0) held.set(s.id, (held.get(s.id) ?? 0) + s.count);
+  }
+  return held;
 }
 
 // Current account coin balance in copper (wallet currency id 1). Needs the `wallet` scope.
@@ -175,7 +193,14 @@ export interface TpTxn {
 
 // Completed trading-post transactions (buys + sells, ~last 90 days), paginated.
 // Needs the `tradingpost` scope on the API key.
-export async function fetchTpTransactions(): Promise<TpTxn[]> {
+// Pass the ids already banked in tp_transactions to stop paging early. History pages come
+// back newest-first and a completed transaction never changes, so the first page that adds
+// nothing new means everything behind it is already stored. On a steady account that turns
+// ~10 requests a run into 2 — the largest remaining block once definitions were cached.
+//
+// Stop on a page that yields nothing NEW rather than on the first known id: a page can
+// interleave a known transaction with unseen ones, and bailing mid-page would drop them.
+export async function fetchTpTransactions(known: Set<number> = new Set()): Promise<TpTxn[]> {
   const out: TpTxn[] = [];
   const kinds: { kind: "buy" | "sell"; path: string }[] = [
     { kind: "buy", path: "buys" },
@@ -186,11 +211,14 @@ export async function fetchTpTransactions(): Promise<TpTxn[]> {
       const rows = await getJson<
         { id: number; item_id: number; price: number; quantity: number; purchased: string | null }[]
       >(`/v2/commerce/transactions/history/${path}?page=${page}&page_size=200`, true);
+      let fresh = 0;
       for (const r of rows) {
         if (!r.purchased) continue; // only completed transactions
+        if (known.has(r.id)) continue;
+        fresh++;
         out.push({ id: r.id, item_id: r.item_id, kind, price: r.price, quantity: r.quantity, purchased: r.purchased });
       }
-      if (rows.length < 200) break;
+      if (rows.length < 200 || fresh === 0) break;
     }
   }
   return out;

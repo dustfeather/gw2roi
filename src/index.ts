@@ -1,7 +1,14 @@
 // Entrypoint. One run = one CronJob invocation: compute top-N, TRUNCATE+INSERT, exit.
 import { run } from "./pipeline.ts";
 import { fetchTpTransactions, fetchWalletCoin } from "./gw2api.ts";
-import { closeDb, pingDb, writeBalance, writeRows, writeTransactions } from "./db.ts";
+import {
+  closeDb,
+  knownTransactionIds,
+  pingDb,
+  writeBalance,
+  writeRows,
+  writeTransactions,
+} from "./db.ts";
 import { phase, timings } from "./timing.ts";
 
 const started = Date.now();
@@ -13,8 +20,11 @@ try {
   const { known, learnable } = await run();
   await phase("write_rows", () => writeRows(known, learnable)); // 10. TRUNCATE + INSERT (both tables)
 
-  // TP transaction history for the investment graph (accumulate-only).
-  const txns = await phase("fetch_txns", fetchTpTransactions);
+  // TP transaction history for the investment graph (accumulate-only). Pass what's already
+  // banked so paging stops at the first page with nothing new — a steady account then costs
+  // 2 requests here instead of walking all ten pages of both histories every hour.
+  const bankedTxnIds = await phase("known_txns", knownTransactionIds);
+  const txns = await phase("fetch_txns", () => fetchTpTransactions(bankedTxnIds));
   await phase("write_txns", () => writeTransactions(txns));
 
   // Wallet coin snapshot — the only way balance history accrues (API gives current only).
@@ -23,7 +33,8 @@ try {
 
   console.log(
     `wrote ${known.length} known + ${learnable.length} learnable rows, ` +
-      `${txns.length} tp transactions, balance=${coin ?? "n/a"}c ` +
+      `${txns.length} new tp transactions (${bankedTxnIds.size} already banked), ` +
+      `balance=${coin ?? "n/a"}c ` +
       `in ${Date.now() - started}ms`,
   );
   console.log(`timings: ${timings()}`);

@@ -1,19 +1,21 @@
 // Orchestrates the 11-step run (§10). Returns known + learnable ranked rows.
 import { config } from "./config.ts";
 import {
+  disciplineRatings,
   fetchAllRecipeIds,
-  fetchDisciplineRatings,
-  fetchItemNames,
-  fetchOwnedMats,
+  fetchCharacters,
+  fetchHeldMats,
+  fetchItems,
   fetchRecipes,
   fetchUnlockedRecipeIds,
+  type Item,
   type Recipe,
 } from "./gw2api.ts";
 import { fetchTpData } from "./datawars.ts";
 import type { CostModel } from "./cost.ts";
 import { scoreRecipe, type RoiRow } from "./roi.ts";
 import { phase } from "./timing.ts";
-import { ensureRecipeCache, loadRecipeDefs, saveRecipeDefs, stalestRecipeIds } from "./db.ts";
+import { ensureDefCache, loadDefs, saveDefs, stalestDefIds } from "./db.ts";
 
 // Disciplines are trained high enough to make this recipe (ignores whether it's learned yet).
 // Must actually HAVE the discipline: a missing discipline must fail even when min_rating is 0,
@@ -56,27 +58,51 @@ function toCraftMap(recipes: Recipe[]): Map<number, Recipe[]> {
 // Definitions land in the cache chunk by chunk, so a cold start that runs out of time still
 // banks its progress: the retry picks up where it stopped rather than re-fetching from zero.
 async function loadRecipeUniverse(allIds: number[]): Promise<Recipe[]> {
-  await ensureRecipeCache();
-  const cached = await loadRecipeDefs(allIds);
+  const cached = await topUpDefCache<Recipe>("recipe_defs", allIds, fetchRecipes, "recipes");
+  // Ids the API declined to return (retired mid-run, or a chunk that failed) simply stay
+  // absent — allIds is the universe, `cached` is what we can actually score.
+  return allIds.map((id) => cached.get(id)).filter((r): r is Recipe => r !== undefined);
+}
+
+// Item definitions for the whole crafting closure: names for the board's links and flags for
+// the drop-only test. ~5.7k ids, cached exactly like recipes.
+async function loadItemDefs(ids: number[]): Promise<Map<number, Item>> {
+  return topUpDefCache<Item>("item_defs", ids, fetchItems, "items");
+}
+
+// Shared cache top-up. Only two sets are ever fetched: ids the cache has never seen
+// (correctness — a missing definition silently drops a recipe from the board, or misreads an
+// owned mat as tradable), and an oldest-first refresh slice sized by RECIPE_REFRESH_PER_RUN
+// (freshness — definitions change on game patches). A warm cache costs a handful of requests
+// an hour instead of scaling with the size of the game, and request volume no longer tracks
+// how slow the API happens to be that hour.
+//
+// Definitions land chunk by chunk, so a cold start that runs out of time still banks its
+// progress: the retry picks up where it stopped rather than re-fetching from zero.
+async function topUpDefCache<T extends { id: number }>(
+  table: "recipe_defs" | "item_defs",
+  allIds: number[],
+  fetchFn: (ids: number[], onPage?: (page: T[]) => Promise<void>) => Promise<T[]>,
+  label: string,
+): Promise<Map<number, T>> {
+  await ensureDefCache(table);
+  const cached = await loadDefs<T>(table, allIds);
 
   const missing = allIds.filter((id) => !cached.has(id));
-  const refresh = await stalestRecipeIds(allIds, config.recipeRefreshPerRun);
+  const refresh = await stalestDefIds(table, allIds, config.recipeRefreshPerRun);
   // A missing id is never also a refresh candidate (refresh only returns cached rows), so
   // the two sets are already disjoint.
   const toFetch = [...missing, ...refresh];
 
   if (toFetch.length > 0) {
-    const fetched = await fetchRecipes(toFetch, saveRecipeDefs);
-    for (const r of fetched) cached.set(r.id, r);
+    const fetched = await fetchFn(toFetch, (page) => saveDefs(table, page));
+    for (const d of fetched) cached.set(d.id, d);
   }
   console.log(
-    `recipes: cached=${allIds.length - missing.length}/${allIds.length} ` +
+    `${label}: cached=${allIds.length - missing.length}/${allIds.length} ` +
       `fetched_new=${missing.length} refreshed=${refresh.length}`,
   );
-
-  // Ids the API declined to return (retired mid-run, or a chunk that failed) simply stay
-  // absent — allIds is the universe, `cached` is what we can actually score.
-  return allIds.map((id) => cached.get(id)).filter((r): r is Recipe => r !== undefined);
+  return cached;
 }
 
 export interface RunResult {
@@ -87,19 +113,16 @@ export interface RunResult {
 }
 
 export async function run(): Promise<RunResult> {
-  // 1-2. Account state + recipe universe.
-  const [ratings, unlocked, allIds, owned] = await phase("account", () =>
-    Promise.all([
-      fetchDisciplineRatings(),
-      fetchUnlockedRecipeIds(),
-      fetchAllRecipeIds(),
-      fetchOwnedMats(),
-    ]),
+  // 1-2. Account state + recipe universe. One /v2/characters read feeds both the discipline
+  // ratings and the bag contents below, so held stock costs nothing extra.
+  const [chars, unlocked, allIds] = await phase("account", () =>
+    Promise.all([fetchCharacters(), fetchUnlockedRecipeIds(), fetchAllRecipeIds()]),
   );
+  const ratings = disciplineRatings(chars);
+  const held = await phase("account", () => fetchHeldMats(chars));
   console.log(
     `disciplines=${[...ratings].map(([d, r]) => `${d}:${r}`).join(",")} ` +
-      `unlocked=${unlocked.size} total_recipes=${allIds.length} ` +
-      `owned_free_mats=${owned.dropOnly.size} held_mats=${owned.held.size}`,
+      `unlocked=${unlocked.size} total_recipes=${allIds.length} held_mats=${held.size}`,
   );
 
   const allRecipes = await phase("recipes", () => loadRecipeUniverse(allIds));
@@ -123,12 +146,29 @@ export async function run(): Promise<RunResult> {
   const tp = await phase("tp_prices", () => fetchTpData([...priceIds]));
   console.log(`priced_items=${tp.size}/${priceIds.size}`);
 
+  // Item definitions for the crafting closure plus everything held. Held ids are included
+  // even when nothing crafts with them: the drop-only test below reads their flags, and a
+  // held item outside the closure (gear, junk) simply never matches an ingredient.
+  const items = await phase("item_defs", () =>
+    loadItemDefs([...new Set([...priceIds, ...held.keys()])]),
+  );
+
+  // Drop-only = flagged NoSell or AccountBound, i.e. can't be bought off the TP. These join
+  // the bundled free-mat table so recipes consuming mats the player already owns are no
+  // longer disqualified. Counts, not just ids: the cost model may only spend what's on hand.
+  const dropOnly = new Map<number, number>();
+  for (const [id, count] of held) {
+    const flags = items.get(id)?.flags;
+    if (flags?.includes("NoSell") || flags?.includes("AccountBound")) dropOnly.set(id, count);
+  }
+  console.log(`owned_free_mats=${dropOnly.size} held_mats=${held.size}`);
+
   // 5. Cost models. Known-table costing may only craft KNOWN intermediates; the learnable
   // table lets chains resolve through any qualified recipe (best-case for a recipe to learn).
   // Each set also gets a `creditOwned` twin that prices held stock at 0 coin, feeding the
   // out-of-pocket / net_profit figures (§5). Four models, four memos — never share one.
-  const ownedMats = owned.dropOnly;
-  const heldMats = owned.held;
+  const ownedMats = dropOnly;
+  const heldMats = held;
   const knownMap = toCraftMap(known);
   const allMap = toCraftMap(qualified);
   const modelKnown: CostModel = { tp, craftMap: knownMap, ownedMats, heldMats };
@@ -186,12 +226,10 @@ export async function run(): Promise<RunResult> {
   const topKnown = passKnown.slice(0, config.topN);
   const topLearn = passLearn.slice(0, config.topN);
 
-  // Resolve output item names for both top-N sets (gw2efficiency + wiki links).
-  const names = await phase("item_names", () =>
-    fetchItemNames([...new Set([...topKnown, ...topLearn].map((r) => r.output_item_id))]),
-  );
+  // Output item names for both top-N sets (gw2efficiency + wiki links). Served from the item
+  // cache loaded above — this used to be its own /v2/items call for the top-N ids alone.
   for (const r of [...topKnown, ...topLearn]) {
-    r.output_item_name = names.get(r.output_item_id) ?? "";
+    r.output_item_name = items.get(r.output_item_id)?.name ?? "";
   }
 
   return { known: topKnown, learnable: topLearn };

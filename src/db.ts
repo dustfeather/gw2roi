@@ -2,7 +2,7 @@
 import pg from "pg";
 import { config } from "./config.ts";
 import type { RoiRow } from "./roi.ts";
-import type { Recipe, TpTxn } from "./gw2api.ts";
+import type { TpTxn } from "./gw2api.ts";
 
 const { Pool } = pg;
 
@@ -257,6 +257,22 @@ CREATE TABLE IF NOT EXISTS tp_transactions (
 );
 `;
 
+// Transaction ids already banked. The history endpoints page newest-first over a ~90-day
+// window and were the largest remaining request block in a run (~10 of ~22); since a
+// completed transaction never changes, everything before the first id we already hold is
+// known and does not need re-reading. Paging stops there instead of walking all ten pages.
+export async function knownTransactionIds(): Promise<Set<number>> {
+  const client = await pool.connect();
+  try {
+    await client.query(TXN_DDL);
+    const res = await client.query<{ id: string }>("SELECT id FROM tp_transactions");
+    // pg returns bigint as string to avoid precision loss; ids are well inside Number range.
+    return new Set(res.rows.map((r) => Number(r.id)));
+  } finally {
+    client.release();
+  }
+}
+
 export async function writeTransactions(txns: TpTxn[]): Promise<void> {
   const client = await pool.connect();
   try {
@@ -307,29 +323,34 @@ export async function writeBalance(coin: number): Promise<void> {
   }
 }
 
-// Recipe definition cache. /v2/recipes is ~13k ids = 66 chunked requests, and it was the
-// single most expensive phase of a run (328s on 2026-08-11 15:00, 612s at 16:00 — same work,
-// pure upstream latency variance). That drift is what pushed runs past the pod deadline.
+// Static game-data caches (recipe + item definitions). Between them these were nearly every
+// request a run made: ~13.2k recipes and the item lookups on top, all re-fetched hourly for
+// data that only changes when ArenaNet ships a patch. The recipe fetch alone was 66 chunked
+// requests whose wall time swung on upstream latency alone — 328s on 2026-08-11 15:00, 612s
+// at 16:00 for identical work — and that drift is what walked runs past the pod deadline.
 //
-// Definitions are immutable per id between game patches, so they are cached here and only
-// re-read. Two properties matter more than the speedup:
+// Two properties matter more than the speedup:
 //   - a run that dies mid-fetch keeps every chunk it already banked (upsert per chunk), so
 //     the next attempt resumes instead of restarting from zero;
 //   - steady state fetches only ids the cache has never seen plus a small oldest-first
 //     refresh slice, so hourly load is a handful of requests rather than a 66-request burst.
-const RECIPE_CACHE_DDL = `
-CREATE TABLE IF NOT EXISTS recipe_defs (
-  id         integer     PRIMARY KEY,
-  def        jsonb       NOT NULL,
-  fetched_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS recipe_defs_fetched_at_idx ON recipe_defs (fetched_at);
-`;
+//
+// Both tables have the same shape, so they share one set of helpers. `DefTable` is a closed
+// union rather than a string: the table name is interpolated into SQL, and a union keeps that
+// checked at compile time instead of trusted at runtime.
+export type DefTable = "recipe_defs" | "item_defs";
 
-export async function ensureRecipeCache(): Promise<void> {
+export async function ensureDefCache(table: DefTable): Promise<void> {
   const client = await pool.connect();
   try {
-    await client.query(RECIPE_CACHE_DDL);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ${table} (
+        id         integer     PRIMARY KEY,
+        def        jsonb       NOT NULL,
+        fetched_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS ${table}_fetched_at_idx ON ${table} (fetched_at);
+    `);
   } finally {
     client.release();
   }
@@ -337,15 +358,18 @@ export async function ensureRecipeCache(): Promise<void> {
 
 // Cached definitions for `ids`. Ids absent from the cache are simply absent from the map —
 // the caller decides what to fetch.
-export async function loadRecipeDefs(ids: number[]): Promise<Map<number, Recipe>> {
-  const out = new Map<number, Recipe>();
+export async function loadDefs<T extends { id: number }>(
+  table: DefTable,
+  ids: number[],
+): Promise<Map<number, T>> {
+  const out = new Map<number, T>();
   if (ids.length === 0) return out;
   const client = await pool.connect();
   try {
     const CHUNK = 5000;
     for (let i = 0; i < ids.length; i += CHUNK) {
-      const res = await client.query<{ def: Recipe }>(
-        "SELECT def FROM recipe_defs WHERE id = ANY($1::int[])",
+      const res = await client.query<{ def: T }>(
+        `SELECT def FROM ${table} WHERE id = ANY($1::int[])`,
         [ids.slice(i, i + CHUNK)],
       );
       for (const row of res.rows) out.set(row.def.id, row.def);
@@ -358,22 +382,27 @@ export async function loadRecipeDefs(ids: number[]): Promise<Map<number, Recipe>
 
 // Upsert definitions and stamp them fresh. Called once per fetched chunk, not once per run,
 // so partial progress survives a run that never reaches the end.
-export async function saveRecipeDefs(recipes: Recipe[]): Promise<void> {
-  if (recipes.length === 0) return;
+export async function saveDefs<T extends { id: number }>(
+  table: DefTable,
+  defs: T[],
+): Promise<void> {
+  if (defs.length === 0) return;
   const client = await pool.connect();
   try {
     const CHUNK = 200;
-    for (let i = 0; i < recipes.length; i += CHUNK) {
-      const chunk = recipes.slice(i, i + CHUNK);
+    for (let i = 0; i < defs.length; i += CHUNK) {
+      const chunk = defs.slice(i, i + CHUNK);
       const params: (number | string)[] = [];
       const tuples: string[] = [];
-      chunk.forEach((r, ri) => {
-        const b = ri * 2;
+      chunk.forEach((d, di) => {
+        const b = di * 2;
         tuples.push(`($${b + 1},$${b + 2}::jsonb)`);
-        params.push(r.id, JSON.stringify(r));
+        params.push(d.id, JSON.stringify(d));
       });
       await client.query(
-        `INSERT INTO recipe_defs (id, def, fetched_at) VALUES ${tuples.join(",")}
+        // fetched_at is omitted, not passed: it defaults to now() on insert and is set
+        // explicitly on conflict, so both paths stamp it without a third bound parameter.
+        `INSERT INTO ${table} (id, def) VALUES ${tuples.join(",")}
          ON CONFLICT (id) DO UPDATE SET def = EXCLUDED.def, fetched_at = now()`,
         params,
       );
@@ -384,15 +413,18 @@ export async function saveRecipeDefs(recipes: Recipe[]): Promise<void> {
 }
 
 // The `limit` cached ids whose definitions were fetched longest ago, restricted to ids that
-// are still in the live recipe universe. Retired ids are skipped so they can never wedge the
-// head of the refresh queue and starve everything behind them.
-export async function stalestRecipeIds(liveIds: number[], limit: number): Promise<number[]> {
+// are still live. Retired ids are skipped so they can never wedge the head of the refresh
+// queue and starve everything behind them.
+export async function stalestDefIds(
+  table: DefTable,
+  liveIds: number[],
+  limit: number,
+): Promise<number[]> {
   if (limit <= 0 || liveIds.length === 0) return [];
   const client = await pool.connect();
   try {
     const res = await client.query<{ id: number }>(
-      `SELECT id FROM recipe_defs WHERE id = ANY($1::int[])
-       ORDER BY fetched_at ASC LIMIT $2`,
+      `SELECT id FROM ${table} WHERE id = ANY($1::int[]) ORDER BY fetched_at ASC LIMIT $2`,
       [liveIds, limit],
     );
     return res.rows.map((r) => r.id);

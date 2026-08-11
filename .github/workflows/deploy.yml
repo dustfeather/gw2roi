@@ -14,10 +14,21 @@ name: deploy
 #   k8s/rbac.yaml, k8s/postgres.yaml, the arc-df-gw2roi runner scale set.
 
 on:
+  # After a new image is built...
   workflow_run:
     workflows: ["build-and-push"]
     types: [completed]
     branches: [main]
+  # ...and independently, whenever the manifests themselves change. Without this trigger a
+  # manifest-only commit reaches the cluster only if some *other* commit happens to rebuild
+  # the image: build-and-push filters on src/**, data/**, Dockerfile, package.json, so
+  # editing k8s/cronjob.yaml alone fires nothing at all. That is how the 2026-08-10 CronJob
+  # retry fix sat committed and unapplied while every slow hour kept stranding itself.
+  push:
+    branches: [main]
+    paths:
+      - "k8s/**"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 concurrency:
@@ -26,8 +37,10 @@ concurrency:
 
 jobs:
   deploy:
-    # only deploy if the build succeeded (or on manual dispatch)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Gate only the image-driven path on a green build. A push/dispatch deploy applies the
+    # manifests already in git against whatever image is current, so a red or rate-limited
+    # build must not be able to block it.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
     steps:
       - uses: actions/checkout@v5
@@ -74,11 +87,19 @@ jobs:
           # Poll with `get` instead of `kubectl wait`: the CI Role (gw2-ci-deployer)
           # grants get/list/create/delete on jobs but NOT watch, and `kubectl wait`
           # opens a watch under the hood ("Failed to watch" spam).
-          for _ in $(seq 1 120); do
+          #
+          # Wait on the Job's terminal CONDITION, never on `.status.failed`. The pod-level
+          # deadline makes a blown attempt an ordinary retryable pod failure, so
+          # `.status.failed` goes to 1 while the Job is still healthy and retrying —
+          # reading it as fatal would fail the deploy on a run that goes on to succeed.
+          # Only the `Failed` condition is terminal.
+          for _ in $(seq 1 240); do
             succeeded="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
-            failed="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.failed}' 2>/dev/null || true)"
+            cond="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)"
             [ "$succeeded" = "1" ] && { echo "init job complete"; break; }
-            [ -n "$failed" ] && [ "$failed" != "0" ] && { echo "init job failed"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
+            case "$cond" in
+              *Failed*) echo "init job failed terminally"; kubectl -n trading get job gw2-roi-init -o wide; exit 1 ;;
+            esac
             sleep 5
           done
           [ "$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)" = "1" ] \

@@ -53,12 +53,33 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      # Build and push are split so a failed push is retried on its own. GHCR answers pushes
+      # with `403 Forbidden - "You have exceeded a secondary rate limit"` under account-wide
+      # write pressure; that killed the 2026-08-10 build, which skipped the deploy, which is
+      # why a CronJob fix committed that day never reached the cluster. The registry's own
+      # advice is to wait and retry, so that is what this does — without paying for a rebuild.
+      - name: Build (load into the local daemon, don't push yet)
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Push to GHCR (retry the transient secondary rate limit)
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -uo pipefail
+          # Push tags one at a time: a partial failure then only retries what is left.
+          for tag in $TAGS; do
+            pushed=""
+            for delay in 0 60 180 300; do
+              [ "$delay" -gt 0 ] && { echo "retrying $tag in ${delay}s"; sleep "$delay"; }
+              if docker push "$tag"; then pushed=1; break; fi
+            done
+            [ -n "$pushed" ] || { echo "::error::giving up on $tag after 4 attempts"; exit 1; }
+          done

@@ -69,6 +69,13 @@ export const config = {
   // datawars2 + gw2 api
   gw2ApiBase: process.env.GW2_API_BASE ?? "https://api.guildwars2.com",
   datawarsBase: process.env.DATAWARS_BASE ?? "https://api.datawars2.ie",
+
+  // How many already-cached recipe definitions to re-fetch per run, oldest first. Recipe
+  // definitions only change on a game patch, so they are cached in Postgres and re-read
+  // instead of re-fetched (see db.ts recipe_defs). This trickle is what keeps the cache
+  // honest without ever re-pulling all ~13k in one burst: at 600/run the whole table turns
+  // over in about a day of hourly runs, costing 3 requests an hour instead of 66.
+  recipeRefreshPerRun: num("RECIPE_REFRESH_PER_RUN", 600),
 } as const;
 
 export type Config = typeof config;

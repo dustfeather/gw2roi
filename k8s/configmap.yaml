@@ -17,5 +17,12 @@ data:
   GATE_MAX_DAYS_TO_SELL: "14"
   GATE_MIN_ROI_PCT: "10"
   GATE_MIN_PROFIT_COPPER: "100"
+  # Recipe definitions are cached in Postgres (recipe_defs) and only topped up: ids the
+  # cache has never seen, plus this many oldest-first re-reads per run. Fetching all ~13k
+  # every hour was 66 chunked requests whose wall time swung 328s-612s on upstream latency
+  # alone, which is what kept pushing runs past the pod deadline. 600/run re-reads the whole
+  # table over about a day at 3 requests an hour. Raise it to converge faster after a game
+  # patch; 0 disables refresh entirely (new ids are still always fetched).
+  RECIPE_REFRESH_PER_RUN: "600"
   PGHOST: "gw2-postgres"
   PGPORT: "5432"

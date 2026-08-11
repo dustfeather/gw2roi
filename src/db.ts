@@ -2,7 +2,7 @@
 import pg from "pg";
 import { config } from "./config.ts";
 import type { RoiRow } from "./roi.ts";
-import type { TpTxn } from "./gw2api.ts";
+import type { Recipe, TpTxn } from "./gw2api.ts";
 
 const { Pool } = pg;
 
@@ -302,6 +302,100 @@ export async function writeBalance(coin: number): Promise<void> {
        ON CONFLICT (recorded_at) DO NOTHING`,
       [coin],
     );
+  } finally {
+    client.release();
+  }
+}
+
+// Recipe definition cache. /v2/recipes is ~13k ids = 66 chunked requests, and it was the
+// single most expensive phase of a run (328s on 2026-08-11 15:00, 612s at 16:00 — same work,
+// pure upstream latency variance). That drift is what pushed runs past the pod deadline.
+//
+// Definitions are immutable per id between game patches, so they are cached here and only
+// re-read. Two properties matter more than the speedup:
+//   - a run that dies mid-fetch keeps every chunk it already banked (upsert per chunk), so
+//     the next attempt resumes instead of restarting from zero;
+//   - steady state fetches only ids the cache has never seen plus a small oldest-first
+//     refresh slice, so hourly load is a handful of requests rather than a 66-request burst.
+const RECIPE_CACHE_DDL = `
+CREATE TABLE IF NOT EXISTS recipe_defs (
+  id         integer     PRIMARY KEY,
+  def        jsonb       NOT NULL,
+  fetched_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recipe_defs_fetched_at_idx ON recipe_defs (fetched_at);
+`;
+
+export async function ensureRecipeCache(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(RECIPE_CACHE_DDL);
+  } finally {
+    client.release();
+  }
+}
+
+// Cached definitions for `ids`. Ids absent from the cache are simply absent from the map —
+// the caller decides what to fetch.
+export async function loadRecipeDefs(ids: number[]): Promise<Map<number, Recipe>> {
+  const out = new Map<number, Recipe>();
+  if (ids.length === 0) return out;
+  const client = await pool.connect();
+  try {
+    const CHUNK = 5000;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const res = await client.query<{ def: Recipe }>(
+        "SELECT def FROM recipe_defs WHERE id = ANY($1::int[])",
+        [ids.slice(i, i + CHUNK)],
+      );
+      for (const row of res.rows) out.set(row.def.id, row.def);
+    }
+  } finally {
+    client.release();
+  }
+  return out;
+}
+
+// Upsert definitions and stamp them fresh. Called once per fetched chunk, not once per run,
+// so partial progress survives a run that never reaches the end.
+export async function saveRecipeDefs(recipes: Recipe[]): Promise<void> {
+  if (recipes.length === 0) return;
+  const client = await pool.connect();
+  try {
+    const CHUNK = 200;
+    for (let i = 0; i < recipes.length; i += CHUNK) {
+      const chunk = recipes.slice(i, i + CHUNK);
+      const params: (number | string)[] = [];
+      const tuples: string[] = [];
+      chunk.forEach((r, ri) => {
+        const b = ri * 2;
+        tuples.push(`($${b + 1},$${b + 2}::jsonb)`);
+        params.push(r.id, JSON.stringify(r));
+      });
+      await client.query(
+        `INSERT INTO recipe_defs (id, def, fetched_at) VALUES ${tuples.join(",")}
+         ON CONFLICT (id) DO UPDATE SET def = EXCLUDED.def, fetched_at = now()`,
+        params,
+      );
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// The `limit` cached ids whose definitions were fetched longest ago, restricted to ids that
+// are still in the live recipe universe. Retired ids are skipped so they can never wedge the
+// head of the refresh queue and starve everything behind them.
+export async function stalestRecipeIds(liveIds: number[], limit: number): Promise<number[]> {
+  if (limit <= 0 || liveIds.length === 0) return [];
+  const client = await pool.connect();
+  try {
+    const res = await client.query<{ id: number }>(
+      `SELECT id FROM recipe_defs WHERE id = ANY($1::int[])
+       ORDER BY fetched_at ASC LIMIT $2`,
+      [liveIds, limit],
+    );
+    return res.rows.map((r) => r.id);
   } finally {
     client.release();
   }

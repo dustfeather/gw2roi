@@ -13,6 +13,7 @@ import { fetchTpData } from "./datawars.ts";
 import type { CostModel } from "./cost.ts";
 import { scoreRecipe, type RoiRow } from "./roi.ts";
 import { phase } from "./timing.ts";
+import { ensureRecipeCache, loadRecipeDefs, saveRecipeDefs, stalestRecipeIds } from "./db.ts";
 
 // Disciplines are trained high enough to make this recipe (ignores whether it's learned yet).
 // Must actually HAVE the discipline: a missing discipline must fail even when min_rating is 0,
@@ -44,6 +45,40 @@ function toCraftMap(recipes: Recipe[]): Map<number, Recipe[]> {
   return m;
 }
 
+// Every live recipe definition, served from the Postgres cache and topped up from the API.
+//
+// Only two sets are ever fetched: ids the cache has never seen (correctness — a missing
+// definition would silently drop a recipe from the board), and an oldest-first refresh slice
+// sized by RECIPE_REFRESH_PER_RUN (freshness — definitions change on game patches). A warm
+// cache therefore costs ~3 requests an hour instead of 66, and the request volume no longer
+// scales with how long the run takes.
+//
+// Definitions land in the cache chunk by chunk, so a cold start that runs out of time still
+// banks its progress: the retry picks up where it stopped rather than re-fetching from zero.
+async function loadRecipeUniverse(allIds: number[]): Promise<Recipe[]> {
+  await ensureRecipeCache();
+  const cached = await loadRecipeDefs(allIds);
+
+  const missing = allIds.filter((id) => !cached.has(id));
+  const refresh = await stalestRecipeIds(allIds, config.recipeRefreshPerRun);
+  // A missing id is never also a refresh candidate (refresh only returns cached rows), so
+  // the two sets are already disjoint.
+  const toFetch = [...missing, ...refresh];
+
+  if (toFetch.length > 0) {
+    const fetched = await fetchRecipes(toFetch, saveRecipeDefs);
+    for (const r of fetched) cached.set(r.id, r);
+  }
+  console.log(
+    `recipes: cached=${allIds.length - missing.length}/${allIds.length} ` +
+      `fetched_new=${missing.length} refreshed=${refresh.length}`,
+  );
+
+  // Ids the API declined to return (retired mid-run, or a chunk that failed) simply stay
+  // absent — allIds is the universe, `cached` is what we can actually score.
+  return allIds.map((id) => cached.get(id)).filter((r): r is Recipe => r !== undefined);
+}
+
 export interface RunResult {
   // recipes the account can craft right now (already known), passing the gates
   known: RoiRow[];
@@ -67,7 +102,7 @@ export async function run(): Promise<RunResult> {
       `owned_free_mats=${owned.dropOnly.size} held_mats=${owned.held.size}`,
   );
 
-  const allRecipes = await phase("recipes", () => fetchRecipes(allIds));
+  const allRecipes = await phase("recipes", () => loadRecipeUniverse(allIds));
 
   // Two candidate sets, both bounded by trained disciplines:
   //   known     = craftable right now (primary table)

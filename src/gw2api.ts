@@ -37,13 +37,20 @@ async function getJson<T>(path: string, auth: boolean): Promise<T> {
   throw new Error(`gw2 still failing after retries (429/5xx/authed 400): ${url}`);
 }
 
-// Fetch every definition for a big id list, chunked by 200.
-async function getBulk<T>(endpoint: string, ids: number[]): Promise<T[]> {
+// Fetch every definition for a big id list, chunked by 200. `onPage` is awaited after each
+// chunk: callers that cache use it to bank progress per chunk, so a run killed partway
+// through a long id list keeps what it already paid for instead of starting over.
+async function getBulk<T>(
+  endpoint: string,
+  ids: number[],
+  onPage?: (page: T[]) => Promise<void>,
+): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < ids.length; i += IDS_PER_REQ) {
     const chunk = ids.slice(i, i + IDS_PER_REQ);
     const page = await getJson<T[]>(`${endpoint}?ids=${chunk.join(",")}`, false);
     out.push(...page);
+    if (onPage) await onPage(page);
   }
   return out;
 }
@@ -88,8 +95,11 @@ export async function fetchAllRecipeIds(): Promise<number[]> {
   return getJson<number[]>("/v2/recipes", false);
 }
 
-export async function fetchRecipes(ids: number[]): Promise<Recipe[]> {
-  return getBulk<Recipe>("/v2/recipes", ids);
+export async function fetchRecipes(
+  ids: number[],
+  onPage?: (page: Recipe[]) => Promise<void>,
+): Promise<Recipe[]> {
+  return getBulk<Recipe>("/v2/recipes", ids, onPage);
 }
 
 interface Item {

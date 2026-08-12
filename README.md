@@ -71,6 +71,39 @@ kubectl -n monitoring rollout restart deploy/grafana
 kubectl -n trading create job --from=cronjob/gw2-crafting-roi gw2-roi-manual
 ```
 
+### Reseed the definition caches (manual, after an expansion)
+
+Recipe and item definitions live in Postgres (`recipe_defs`, `item_defs`) and are read from
+there instead of re-fetched — a warm cache costs ~6 GW2 API requests a run instead of ~96.
+The hourly bot keeps them honest by itself: it always fetches ids the cache has never seen,
+and re-reads `RECIPE_REFRESH_PER_RUN` (600) of the oldest rows per run, turning the whole
+table over in about a day. **New recipes therefore appear without any manual step.**
+
+The seeder exists for the two cases that trickle handles badly — a cold/lost cache, and a
+content patch that rewrites definitions the cache already holds (reworked recipes, renamed or
+restatted items), where the ids are not new so only the staleness re-read would catch them,
+a day later.
+
+```sh
+bash scripts/seed-cache.sh              # resume: fetch only ids not already cached
+bash scripts/seed-cache.sh --refresh    # re-fetch EVERY definition — expansion / big patch
+```
+
+Runs `scripts/seed-cache.ts` straight from this working copy — needs `bun install`, nothing
+else. The wrapper reads the Postgres credentials out of `secret/gw2-postgres-creds`, opens a
+port-forward to the in-cluster database, runs the seeder, and prints the resulting row counts.
+No image build and no deploy: the seeder only writes cache tables the running bot already
+reads, so nothing has to be stopped while it fills.
+
+Takes 10-20 min cold and is safe to interrupt and re-run — chunks are banked as they land, so
+a re-run continues instead of restarting.
+
+Against any other database, skip the wrapper:
+
+```sh
+PGHOST=localhost PGUSER=gw2 PGPASSWORD=... PGDATABASE=gw2 bun run seed-cache
+```
+
 ## Setup notes (from DESIGN.md, unresolved until you fill them)
 
 - **Runner scale set** `arc-df-gw2roi` doesn't exist yet — create it at bootstrap (mirror an existing `arc-df-*` repo); its SA is already referenced in `rbac.yaml`.

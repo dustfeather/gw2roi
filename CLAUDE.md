@@ -30,6 +30,7 @@ Cluster operations (kube context `k3s-itguys`, namespace `trading`):
 
 ```sh
 bash scripts/run-now.sh                    # one-off Job from the CronJob, tail logs, row count, repush dashboard
+bash scripts/seed-cache.sh [--refresh]     # reseed recipe_defs/item_defs over a port-forward — manual, expansion only
 bash scripts/provision-grafana.sh          # upsert datasource + dashboard via Grafana HTTP API (needs .env)
 kubectl -n trading logs job/<job>          # `kubectl wait` fails: CI Role has no `watch` verb — poll with `get`
 ```
@@ -91,6 +92,16 @@ by id) so history survives the API's ~90-day window. `account_balance` is likewi
 accumulate-only, one wallet-coin snapshot appended per run — `/v2/account/wallet` returns only
 the *current* balance, so that table is the only balance history that will ever exist; never
 truncate it. `fmt_coin(bigint)` is a Postgres function created here so dashboard SQL stays DRY.
+
+`recipe_defs` / `item_defs` are the static-definition caches. They are self-maintaining — the
+pipeline always fetches ids the cache has never seen and re-reads `RECIPE_REFRESH_PER_RUN`
+oldest rows per run — so **new recipes need no manual step**. `scripts/seed-cache.ts` (wrapped
+by `scripts/seed-cache.sh`) is only for a cold/lost cache or a patch that rewrites definitions
+already cached under the same ids, where the trickle would take a day to notice. It is not on
+any schedule and deliberately so. Being manual-only, it runs from the working copy over a
+port-forward — not in-cluster — so it is not in the image and needs no deploy. It fetches only
+public endpoints but still needs some `ARENA_NET_KEY` set, because `config.ts` builds `config`
+at module load and throws without one.
 
 Known gotchas encoded in the code: `/v2/account/recipes` reports only `LearnedFromItem` sheet
 unlocks — never discovery recipes — so `isKnown()` treats every discovery recipe as known and

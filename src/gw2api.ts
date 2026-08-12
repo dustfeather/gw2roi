@@ -4,6 +4,10 @@ import { config } from "./config.ts";
 const IDS_PER_REQ = 200;
 const MIN_INTERVAL_MS = 210; // ~5 req/s with headroom
 
+// Distinguishable so a bulk `?ids=` sweep can tell "none of these ids exist" apart from a
+// real failure. Every other caller sees it as a plain Error and still throws.
+class Gw2NotFound extends Error {}
+
 let lastReq = 0;
 async function throttle(): Promise<void> {
   const now = Date.now();
@@ -30,7 +34,9 @@ async function getJson<T>(path: string, auth: boolean): Promise<T> {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`gw2 ${res.status} ${res.statusText} for ${url} ${body.slice(0, 200)}`);
+      const msg = `gw2 ${res.status} ${res.statusText} for ${url} ${body.slice(0, 200)}`;
+      if (res.status === 404) throw new Gw2NotFound(msg);
+      throw new Error(msg);
     }
     return (await res.json()) as T;
   }
@@ -48,7 +54,18 @@ async function getBulk<T>(
   const out: T[] = [];
   for (let i = 0; i < ids.length; i += IDS_PER_REQ) {
     const chunk = ids.slice(i, i + IDS_PER_REQ);
-    const page = await getJson<T[]>(`${endpoint}?ids=${chunk.join(",")}`, false);
+    // A bulk request whose ids only PARTLY resolve comes back 206 with the valid subset, but
+    // one where NONE resolve is a 404 `all ids provided are invalid`. Recipes do reference
+    // ids /v2/items never exposes (dev/unreleased entries — ~38 across the full crafting
+    // closure), and once those cluster into a chunk of their own the 404 would abort the whole
+    // sweep, permanently: they are dead ids, so every retry fails identically. Skip the chunk.
+    // `endpoint` is a fixed literal at both call sites, so a 404 here cannot be a bad path.
+    const page = await getJson<T[]>(`${endpoint}?ids=${chunk.join(",")}`, false).catch(
+      (e: unknown) => {
+        if (e instanceof Gw2NotFound) return [] as T[];
+        throw e;
+      },
+    );
     out.push(...page);
     if (onPage) await onPage(page);
   }

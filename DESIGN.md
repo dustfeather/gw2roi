@@ -58,14 +58,14 @@ Two costings of the same tree, per row:
 - **Revenue** (`list_revenue`) = output sold by *listing* = `sell_price × 0.85`.
 - **Profit** = revenue − cost; **ROI** = profit / cost.
 
-**Out-of-pocket** — the same recursion re-run with a `creditOwned` cost model, where any item the account holds in at least the demanded quantity costs **0 coin**, tradable or not. Owning a mid-tree intermediate short-circuits its whole subtree, so the discount is recursive by construction:
+**Out-of-pocket** — the *same plan* the market-true pass chose, re-walked against a copy of the account's stock. Each node spends what inventory can cover and pays market price only for the shortfall; owning a mid-tree intermediate removes demand for its whole subtree, so the discount is recursive by construction. Credit is **partial** (1 of 3 Bolt of Damask pays for two) and the copy is **spent down as the walk consumes it**, so one stack cannot discount two branches at once:
 - **`out_of_pocket`** = coin actually spent per output item.
 - **`owned_value`** = `craft_cost − out_of_pocket` — market value of the held mats consumed.
 - **`net_profit`** = `list_revenue − out_of_pocket`; **`net_roi_pct`** = net_profit / out_of_pocket (capped, undefined when nothing is spent).
 
 **Rank = `net_profit` desc**, so a recipe whose mats are already in the bank outranks an otherwise-equal one. The gates (§6) deliberately keep judging the market-true figures: owning mats reorders recipes that already clear the bar, it never floats a break-even recipe onto the board.
 
-Held stock is credited **per row independently** — the same 25 Mithril Ore discounts every recipe that consumes it. The board ranks single crafts, not a joint plan, so this is an edge signal, not a budget.
+Held stock is credited **per row independently** — the same 25 Mithril Ore discounts every recipe that consumes it, because each row answers "if I craft *this*, what do I pay?". The board ranks single crafts, not a joint plan, so this is an edge signal, not a budget. Within a single row it is a budget, and is enforced as one.
 
 Also displayed per row (context, not ranking):
 - **Instant-flip floor** = output dumped into buy order = `buy_price × 0.85`.

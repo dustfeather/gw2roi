@@ -12,7 +12,7 @@ import {
   type Recipe,
 } from "./gw2api.ts";
 import { fetchTpData } from "./datawars.ts";
-import type { CostModel } from "./cost.ts";
+import type { CostMemo, CostModel } from "./cost.ts";
 import { scoreRecipe, type RoiRow } from "./roi.ts";
 import { phase } from "./timing.ts";
 import { ensureDefCache, loadDefs, saveDefs, stalestDefIds } from "./db.ts";
@@ -165,25 +165,26 @@ export async function run(): Promise<RunResult> {
 
   // 5. Cost models. Known-table costing may only craft KNOWN intermediates; the learnable
   // table lets chains resolve through any qualified recipe (best-case for a recipe to learn).
-  // Each set also gets a `creditOwned` twin that prices held stock at 0 coin, feeding the
-  // out-of-pocket / net_profit figures (§5). Four models, four memos — never share one.
+  // Two models, two memos — never share one across the two, their craftMaps differ.
+  //
+  // The out-of-pocket figures (§5) are NOT a third and fourth model: they re-walk the plan
+  // each model already chose, spending a per-recipe copy of heldMats against it. Deciding the
+  // plan once is what makes the memo safe to share — an inventory that decrements as it is
+  // consumed is order-dependent, so a cost keyed on (item, need) alone could not cache it.
   const ownedMats = dropOnly;
   const heldMats = held;
   const knownMap = toCraftMap(known);
   const allMap = toCraftMap(qualified);
   const modelKnown: CostModel = { tp, craftMap: knownMap, ownedMats, heldMats };
   const modelAll: CostModel = { tp, craftMap: allMap, ownedMats, heldMats };
-  const modelKnownOwned: CostModel = { ...modelKnown, creditOwned: true };
-  const modelAllOwned: CostModel = { ...modelAll, creditOwned: true };
 
   // 6-8. Cost, ROI, gates for each set.
   const passKnown: RoiRow[] = [];
   let scoredKnown = 0;
-  const memoKnown = new Map<string, number | null>();
-  const memoKnownOwned = new Map<string, number | null>();
+  const memoKnown: CostMemo = new Map();
   await phase("score_known", () => {
     for (const r of known) {
-      const s = scoreRecipe(modelKnown, modelKnownOwned, r, memoKnown, memoKnownOwned);
+      const s = scoreRecipe(modelKnown, r, memoKnown);
       if (!s) continue;
       scoredKnown++;
       if (s.passes) passKnown.push(s.row);
@@ -192,11 +193,10 @@ export async function run(): Promise<RunResult> {
 
   const passLearn: RoiRow[] = [];
   let scoredLearn = 0;
-  const memoLearn = new Map<string, number | null>();
-  const memoLearnOwned = new Map<string, number | null>();
+  const memoLearn: CostMemo = new Map();
   await phase("score_learnable", () => {
     for (const r of learnable) {
-      const s = scoreRecipe(modelAll, modelAllOwned, r, memoLearn, memoLearnOwned);
+      const s = scoreRecipe(modelAll, r, memoLearn);
       if (!s) continue;
       scoredLearn++;
       if (s.passes) {

@@ -2,7 +2,7 @@
 import type { Recipe } from "./gw2api.ts";
 import type { TpData } from "./datawars.ts";
 import { config } from "./config.ts";
-import { type CostModel, craftCost } from "./cost.ts";
+import { type CostMemo, type CostModel, craftCost, outOfPocketCost } from "./cost.ts";
 
 export interface RoiRow {
   recipe_id: number;
@@ -41,20 +41,18 @@ export interface Scored {
 
 // Build ROI figures for one candidate recipe. Returns null if ingredients unobtainable
 // or the output has no TP data.
-// `model` is the market-true cost model; `modelOwned` is the same model with `creditOwned`
-// set, and must carry its OWN memo — the two price the same items differently.
+// Both figures come off the SAME model and memo: the out-of-pocket pass re-walks the plan the
+// market pass already chose, paying market price only for what held stock cannot cover.
 export function scoreRecipe(
   model: CostModel,
-  modelOwned: CostModel,
   r: Recipe,
-  memoInstant: Map<string, number | null>,
-  memoOwned: Map<string, number | null>,
+  memo: CostMemo,
 ): Scored | null {
   const out = model.tp.get(r.output_item_id);
   if (!out) return null;
 
   // need=1: the board ranks a single craft, so ingredient demand is one recipe's worth.
-  const cost = craftCost(model, r, 1, memoInstant);
+  const cost = craftCost(model, r, 1, memo);
   if (cost === null || cost <= 0) return null; // bad leaf -> disqualified in cost model
 
   const outCount = r.output_item_count > 0 ? r.output_item_count : 1;
@@ -67,10 +65,10 @@ export function scoreRecipe(
   const profit = listRevenue - craftCostPer;
   const roiPct = (profit / craftCostPer) * 100;
 
-  // Same tree, mats already in the account priced at 0 coin. It can only ever be cheaper than
-  // the market-true cost, and it can't newly disqualify a branch (owned stock only *adds* a
-  // candidate), but clamp anyway so a null never silently reads as "free".
-  const oop = craftCost(modelOwned, r, 1, memoOwned);
+  // Same plan, paying only for what held stock cannot cover. It can only ever be cheaper than
+  // the market-true cost, and it can't newly disqualify a branch (spending stock only *removes*
+  // demand), but clamp anyway so a null never silently reads as "free".
+  const oop = outOfPocketCost(model, r, 1, memo);
   const outOfPocket = oop === null ? craftCostPer : Math.min(oop, craftCostPer);
   const ownedValue = craftCostPer - outOfPocket;
   const netProfit = listRevenue - outOfPocket;

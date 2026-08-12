@@ -51,13 +51,23 @@ sell_price, craft-it, coin-vendor, spend-held-stock)`; `visited` guards recipe c
 no obtainable price returns `null`, which disqualifies the entire branch — this null-propagation
 is the main correctness constraint.
 
-**Every recipe is costed twice.** The market-true model above produces `craft_cost` / `profit` /
-`roi_pct`; a twin model with `creditOwned: true` prices anything in `heldMats` (all bank +
-material-storage stock, tradable included) at 0 coin and produces `out_of_pocket` / `owned_value`
-/ `net_profit` / `net_roi_pct` (§5). So four models and **four memo maps** in `pipeline.ts` —
-known/learnable × market/owned. Never share a memo across any two of them. The `creditOwned`
-branch short-circuits before the craft recursion, which is what makes the discount recursive:
-owning an intermediate zeroes its whole subtree.
+**Every recipe is costed twice, from one plan.** The market pass memoizes a `Source` per
+`(item, need)` — *which* supply won, not just its price — producing `craft_cost` / `profit` /
+`roi_pct`. `outOfPocketCost` then re-walks that same plan against a **per-recipe copy of
+`heldMats`** (all bank + material-storage stock, tradable included), paying market price only
+for what the copy cannot cover, and produces `out_of_pocket` / `owned_value` / `net_profit` /
+`net_roi_pct` (§5). Two models and **two memo maps** — known/learnable — never shared across
+the two, since their `craftMap`s differ.
+
+The inventory copy is **decremented as it is spent**, and that is load-bearing. The old model
+tested `heldMats.get(id) >= need` independently at each node, so one stack paid for several
+branches: a tree needing 11 Glob of Ectoplasm across three sub-crafts priced all 11 at zero off
+9 in the bank, because no single node ever asked for more than 5 (issue #1, ~6.2k copper on one
+recipe). `net_profit` is the rank key and the error grew with tree depth, so it favoured exactly
+the deep ascended chains it was least true for. Deciding the plan once, in the market pass, is
+also what keeps the memo shareable — a decrementing inventory is order-dependent and cannot be
+cached on `(item, need)` alone. Drop-only mats are the one exception: they stay free past
+exhaustion, because in the market model held stock is their *only* supply, not a discount.
 
 `need` is the **quantity demanded**, threaded down the tree (`craftCost` multiplies by
 `ceil(need / output_item_count)`) and part of the memo key. TP/vendor supply is unlimited so

@@ -153,7 +153,15 @@ export async function fetchHeldMats(chars: Character[]): Promise<Map<number, num
   const [materials, bank, shared] = await Promise.all([
     getJson<AccountSlot[]>("/v2/account/materials", true),
     getJson<(AccountSlot | null)[]>("/v2/account/bank", true),
-    getJson<(AccountSlot | null)[]>("/v2/account/inventories", true),
+    // Shared inventory slots. Singular `inventory` — `/v2/account/inventories` 404s, which
+    // took every run down for nine hours on 2026-08-11. Optional by design: this is a
+    // handful of slots enriching a discount, so a failure here degrades the held-stock
+    // figure rather than losing the whole run. Storage, bank and bags are load-bearing and
+    // deliberately left to throw.
+    getJson<(AccountSlot | null)[]>("/v2/account/inventory", true).catch((e: unknown) => {
+      console.warn(`shared inventory unavailable, continuing without it: ${String(e)}`);
+      return [] as (AccountSlot | null)[];
+    }),
   ]);
 
   // Bag contents only — the bag item itself is equipped, not stock we could consume.

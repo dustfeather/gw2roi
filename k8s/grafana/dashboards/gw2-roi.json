@@ -107,7 +107,7 @@
                 "value": [
                   {
                     "title": "Open in GW2Efficiency crafting calculator",
-                    "url": "https://gw2efficiency.com/crafting/calculator/a~1!b~1!c~1!d~1-${__data.fields.item_id}!e~0!f~1",
+                    "url": "https://gw2efficiency.com/crafting/calculator/a~1!b~0!c~1!d~1-${__data.fields.item_id}!e~0!f~1",
                     "targetBlank": true
                   }
                 ]

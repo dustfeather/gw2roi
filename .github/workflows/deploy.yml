@@ -1,9 +1,15 @@
 name: deploy
 
-# GitHub is the single source of truth for cluster secrets. This job runs on the
+# A shim over dustfeather/shared-workflows' deploy-k8s.yml. GitHub is still the
+# single source of truth for cluster secrets; the shared workflow runs on the
 # in-cluster ARC runner (SA arc-df-gw2roi-gha-rs-no-permission, bound to the
-# gw2-ci-deployer Role) and pushes GitHub Actions Secrets into the trading ns,
-# then applies the ConfigMap + CronJob. kubectl uses the pod's in-cluster config.
+# gw2-ci-deployer Role), pushes GitHub Actions Secrets into the trading ns, and
+# applies the ConfigMap + CronJob. kubectl uses the pod's in-cluster config.
+#
+# This repo was carved out of issue #18's rollout because it needs TWO distinct
+# Secrets, one of them mixing secret and non-secret literals — which a single
+# SECRET_LITERALS blob cannot express. The shared workflow's SECRETS_MANIFEST
+# input is what closed that gap: one blob, a `[name]` header per Secret.
 #
 # Required GitHub Actions Secrets (Settings > Secrets and variables > Actions):
 #   ARENA_NET_KEY   - ArenaNet API key (account,characters,unlocks,inventories scopes)
@@ -28,8 +34,12 @@ on:
     branches: [main]
     paths:
       - "k8s/**"
+      - "scripts/kick-init-job.sh"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: deploy-gw2roi
@@ -41,73 +51,47 @@ jobs:
     # manifests already in git against whatever image is current, so a red or rate-limited
     # build must not be able to block it.
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
-    steps:
-      - uses: actions/checkout@v5
+    permissions:
+      contents: read
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-k8s.yml@v4
+    with:
+      namespace: trading
+      runner: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
+      # `none`, not the `get` default: gw2-ci-deployer is a namespace-scoped
+      # Role, and reading a Namespace is a cluster-scoped verb it does not have.
+      # The previous hand-written job never checked either.
+      ensure-namespace: none
+      manifests: |
+        k8s/configmap.yaml
+        k8s/cronjob.yaml
+      # The StatefulSet itself is bootstrap-only, so this waits on an object
+      # this job did not apply — deliberately. The init job below writes to
+      # Postgres, so a deploy that raced it would fail for a reason that has
+      # nothing to do with the deploy.
+      rollout-targets: statefulset/gw2-postgres
+      rollout-timeout: 180s
+      # Runs after the rollout wait, and a non-zero exit fails the deploy:
+      # populate craft_roi now rather than leaving the table empty until the
+      # next scheduled slot.
+      verify-command: bash scripts/kick-init-job.sh
+      show-command: kubectl get cronjob gw2-crafting-roi -o wide
+    secrets:
+      # Two Secrets, hence SECRETS_MANIFEST rather than secret-name +
+      # SECRET_LITERALS. gw2-postgres-creds mixes the password with the
+      # non-secret user and database names on purpose: it is consumed by BOTH
+      # the StatefulSet and the bot, which expect one Secret, not two.
+      SECRETS_MANIFEST: |
+        [gw2-api-key]
+        ARENA_NET_KEY=${{ secrets.ARENA_NET_KEY }}
 
-      - name: Sync secrets from GitHub -> trading ns
-        env:
-          ARENA_NET_KEY: ${{ secrets.ARENA_NET_KEY }}
-          PG_PASSWORD: ${{ secrets.PG_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$ARENA_NET_KEY" || { echo "missing GH secret ARENA_NET_KEY"; exit 1; }
-          test -n "$PG_PASSWORD"   || { echo "missing GH secret PG_PASSWORD"; exit 1; }
+        [gw2-postgres-creds]
+        POSTGRES_USER=gw2
+        POSTGRES_DB=gw2
+        POSTGRES_PASSWORD=${{ secrets.PG_PASSWORD }}
+        PGUSER=gw2
+        PGDATABASE=gw2
+        PGPASSWORD=${{ secrets.PG_PASSWORD }}
 
-          # ArenaNet API key
-          kubectl -n trading create secret generic gw2-api-key \
-            --from-literal=ARENA_NET_KEY="$ARENA_NET_KEY" \
-            --dry-run=client -o yaml | kubectl -n trading apply -f -
-
-          # Postgres creds — consumed by BOTH the StatefulSet and the bot.
-          # user/db are non-secret; password comes from GitHub.
-          kubectl -n trading create secret generic gw2-postgres-creds \
-            --from-literal=POSTGRES_USER=gw2 \
-            --from-literal=POSTGRES_DB=gw2 \
-            --from-literal=POSTGRES_PASSWORD="$PG_PASSWORD" \
-            --from-literal=PGUSER=gw2 \
-            --from-literal=PGDATABASE=gw2 \
-            --from-literal=PGPASSWORD="$PG_PASSWORD" \
-            --dry-run=client -o yaml | kubectl -n trading apply -f -
-
-      - name: Apply config + cronjob
-        run: |
-          set -euo pipefail
-          kubectl -n trading apply -f k8s/configmap.yaml
-          kubectl -n trading apply -f k8s/cronjob.yaml
-
-      - name: Wait for Postgres to be ready
-        run: kubectl -n trading rollout status statefulset/gw2-postgres --timeout=180s
-
-      - name: Kick an immediate run (populate craft_roi now, don't wait for schedule)
-        run: |
-          set -euo pipefail
-          kubectl -n trading delete job gw2-roi-init --ignore-not-found
-          kubectl -n trading create job gw2-roi-init --from=cronjob/gw2-crafting-roi
-          # Poll with `get` instead of `kubectl wait`: the CI Role (gw2-ci-deployer)
-          # grants get/list/create/delete on jobs but NOT watch, and `kubectl wait`
-          # opens a watch under the hood ("Failed to watch" spam).
-          #
-          # Wait on the Job's terminal CONDITION, never on `.status.failed`. The pod-level
-          # deadline makes a blown attempt an ordinary retryable pod failure, so
-          # `.status.failed` goes to 1 while the Job is still healthy and retrying —
-          # reading it as fatal would fail the deploy on a run that goes on to succeed.
-          # Only the `Failed` condition is terminal.
-          for _ in $(seq 1 240); do
-            succeeded="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
-            cond="$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)"
-            [ "$succeeded" = "1" ] && { echo "init job complete"; break; }
-            case "$cond" in
-              *Failed*) echo "init job failed terminally"; kubectl -n trading get job gw2-roi-init -o wide; exit 1 ;;
-            esac
-            sleep 5
-          done
-          [ "$(kubectl -n trading get job gw2-roi-init -o jsonpath='{.status.succeeded}' 2>/dev/null || true)" = "1" ] \
-            || { echo "init job did not complete in time"; kubectl -n trading get job gw2-roi-init -o wide; exit 1; }
-
-      - name: Show cronjob
-        run: kubectl -n trading get cronjob gw2-crafting-roi -o wide
-
-      # Grafana dashboards/datasource are NOT provisioned from CI.
-      # They live in git (k8s/grafana/dashboards/) and are pushed on demand,
-      # locally, via: scripts/provision-grafana.sh  (reads GRAFANA_API_KEY + PG_PASSWORD from .env)
+  # Grafana dashboards/datasource are NOT provisioned from CI.
+  # They live in git (k8s/grafana/dashboards/) and are pushed on demand,
+  # locally, via: scripts/provision-grafana.sh  (reads GRAFANA_API_KEY + PG_PASSWORD from .env)

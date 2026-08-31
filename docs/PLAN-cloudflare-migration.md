@@ -527,36 +527,95 @@ until step 5.
 
 ### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST)
 
-**Why first.** The org has `deny_unmatched_requests: false` with an empty exempted-zones list, so
-a hostname no application matches is **served publicly, not blocked**. The board renders
-`account_balance` and the entire `tp_transactions` ledger. The old exposure model was network
-topology — `grafana.itguys.ro` is an unproxied WARP-mesh address, unreachable from the internet
-regardless of Access. On a Worker there is no such backstop: Access is the only control. Deploy
-before this exists and the ledger is world-readable for that window.
+**Why first.** Re-confirmed on the account 2026-08-31: `deny_unmatched_requests: false`,
+`deny_unmatched_requests_exempted_zone_names: []`, and **no existing app covers
+`gw2.itguys.ro`** — the five apps are `ITGuys Admin` (path-scoped on `itguys.ro` plus
+`invest.itguys.ro`), `Automation API` (`itguys.ro/api/automation/posts`),
+`dosar-rapid render service` (`rdr-service.itguys.ro`), `App Launcher`, `Warp Login App`. No
+destination wildcards the zone. So the app is the whole gate; there is no zone-wide backstop.
+
+Sharper than §6 put it: the old board was not "unproxied so Access did not apply", it was
+**never at the edge at all**. `grafana.itguys.ro` is `A 100.96.0.4`, `proxied=false` — a CGNAT /
+WARP-mesh address, so traffic never reaches Cloudflare and Access *could not* have applied to it.
+Private-by-network, not private-by-policy. Same for `apps`, `headlamp`, `nextcloud`, `pdf`,
+`social`, `vault`. A Worker on a custom domain is the opposite: proxied by construction, reachable
+from anywhere, and Access is the only control.
+
+**Corollary worth stating, because it is how this gets silently broken later:** the protection
+depends on the record being **proxied**. `routes: [{ custom_domain: true }]` in
+`apps/web/wrangler.jsonc` creates a proxied record, which is correct. If anyone later replaces it
+with a grey-cloud `A` record into the mesh — the house pattern for every other service on this
+zone — **the Access app goes inert**, because requests stop passing through the edge that enforces
+it. There is currently no `gw2` record of any kind on the zone (0 of 42), which is also why §6
+says not to hand-create one.
 
 Create one **self-hosted** application, its own app rather than a literal on `ITGuys Admin`
 (attaching `Service Token Access` to that app would hand the CI token `itguys.ro/admin`,
-`/api/admin` and `invest.itguys.ro` as well). Config, per §6:
+`/api/admin` and `invest.itguys.ro` as well). An extra app object costs nothing: **Access bills
+per seat, not per app.** Headroom is 500 apps (5 in use), 500 reusable policies (3), 50 service
+tokens (3).
 
-| field | value |
-|---|---|
-| `type` | `self_hosted` |
-| `destinations` | `gw2.itguys.ro` |
-| `session_duration` | `730h` |
-| `allowed_idps` | `[]` — all IdPs, so one-time PIN is offered |
-| `auto_redirect_to_identity` | `false` (required when `allowed_idps` is empty) |
-| policies | `Admin Access` (allow) and `Service Token Access` (non_identity), both **existing and reused by id** |
+Both policies already exist and are attached **by id only** — exact values, verified:
 
-**Trap:** the `google-apps` IdP is pinned to `apps_domain: "itguys.ro"`, so `dustfeather@gmail.com`
-cannot authenticate through it. Any app setting `allowed_idps: [google-apps]` is Workspace-only.
-Leaving it `[]` is what `dosar-rapid` and `Automation API` already do.
+| policy | id | decision |
+|---|---|---|
+| `Admin Access` | `b7cfc7c3-79f3-46d1-b5ea-3f957a200a0c` | `allow` (2 × email include) |
+| `Service Token Access` | `eb56b673-6c3d-49f4-ab1e-60d4b6a8ea95` | `non_identity` (2 × service_token) |
 
-An extra app object costs nothing: **Access bills per seat, not per app.** Headroom is 500 apps
-(5 in use), 500 reusable policies (3), 50 service tokens (3).
+```bash
+CF=$(cat ~/.cf-token)
+curl -s -X POST \
+  "https://api.cloudflare.com/client/v4/accounts/328c2ac1408b3260bb83a7735a7fafe8/access/apps" \
+  -H "Authorization: Bearer $CF" -H "Content-Type: application/json" --data @- <<'JSON' \
+  | jq '{success, errors, id: .result.id, aud: .result.aud,
+         policies: [.result.policies[]? | {id, name, precedence, reusable}]}'
+{
+  "name": "GW2 Crafting ROI",
+  "type": "self_hosted",
+  "destinations": [{ "type": "public", "uri": "gw2.itguys.ro" }],
+  "session_duration": "730h",
+  "allowed_idps": [],
+  "auto_redirect_to_identity": false,
+  "app_launcher_visible": true,
+  "http_only_cookie_attribute": true,
+  "policies": [
+    { "id": "eb56b673-6c3d-49f4-ab1e-60d4b6a8ea95", "precedence": 1 },
+    { "id": "b7cfc7c3-79f3-46d1-b5ea-3f957a200a0c", "precedence": 2 }
+  ]
+}
+JSON
+```
 
-**Done when** `curl -sI https://gw2.itguys.ro/` returns a 302 to the Access login page rather than
-the board — check this *before* step 2, while the hostname still 404s at the edge, and again
-right after the first deploy.
+Four things about that body:
+
+- **`allowed_idps: []` + `auto_redirect_to_identity: false` is deliberate, and is the one place
+  not to copy `ITGuys Admin`.** That app pins Google Workspace
+  (`385f2bf3-6404-4330-ba15-75bb13cfecee`) and auto-redirects. But the `google-apps` IdP is pinned
+  to `apps_domain: "itguys.ro"`, so `dustfeather@gmail.com` cannot authenticate through it — an
+  app that pins it is Workspace-only. Empty means every IdP is offered, including the account's
+  `onetimepin` provider (`a2045a0f-a175-4e37-a894-a84d0bdcc6ad`), which is the escape hatch.
+  `auto_redirect_to_identity` also requires *exactly one* `allowed_idps` entry, so with `[]` it is
+  ignored regardless. `dosar-rapid render service` and `Automation API` both run `[]`.
+- **Service token first (precedence 1)** so a machine caller never gets the login redirect.
+- **Send `{id, precedence}` and nothing else per entry.** Adding `include`/`exclude`/`require`/
+  `decision` inline converts the entry into a *new app-scoped, non-reusable* policy instead of
+  linking the existing one — that is how `dosar-rapid render service` ended up with a
+  `reusable: false` policy of its own. Hence the `reusable` field in the `jq` above: both must
+  come back `true`.
+- **Keep `result.aud`** from the response. It is the JWT audience tag, needed by anything that
+  ever validates the Access JWT server-side.
+
+`session_duration: "730h"` matches `ITGuys Admin` and `Automation API`. Do not copy
+`dosar-rapid render service`'s `0s` — that means no session cookie at all, which is right for a
+machine endpoint and wrong for a browser dashboard.
+
+Wrangler has no Access command; this REST call (or Terraform
+`cloudflare_zero_trust_access_application`) is the only path.
+
+**Done when** the app lists `gw2.itguys.ro` and both policies come back `reusable: true`. Note the
+hostname does **not** answer yet at this point — there is no DNS record until step 4 deploys the
+Worker, so a `curl` gets NXDOMAIN, not a 302. The 302-to-login check belongs in step 4, right
+after the first deploy, and is what proves the ordering held.
 
 ### Step 2 — Cloudflare repo secrets
 
@@ -630,9 +689,12 @@ Neither Worker sets `verify-url`: the cron Worker has no HTTP surface, and the b
 Access so an unauthenticated curl would 302 and fail every deploy. **A green run therefore does
 not prove the board renders or that the job works.** Check by hand:
 
-1. Open `https://gw2.itguys.ro/` in a browser, authenticate through Access, confirm the stat row,
-   the graph and both tables render — the graph is the part that reads `tp_transactions` and
-   `account_balance`, so it is also the import's end-to-end check.
+1. **Check the gate before the content.** `curl -sI https://gw2.itguys.ro/` must return a **302 to
+   the Access login page**, not 200 and not the board. A 200 here means step 1 did not take and
+   the ledger is public — stop and fix that before anything else. Then open it in a browser,
+   authenticate, and confirm the stat row, the graph and both tables render; the graph is the
+   part that reads `tp_transactions` and `account_balance`, so it doubles as the import's
+   end-to-end check.
 2. Wait for the first `0 * * * *` tick, then `npx wrangler tail gw2-roi-cron` or:
 
    ```sh

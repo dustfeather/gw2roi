@@ -520,14 +520,18 @@ Everything below needs a credential or a console click that the port itself did 
 the order: **the two missing Cloudflare repo secrets were the only thing failing the deploy.**
 Adding them is the switch that makes the board public. So the Access application went first.
 
-**Steps 1–3 are done (2026-08-31). Steps 4 and 5 remain.** The Access app exists, both repo
-secrets are set, and all four tables are in D1 — so the next push to `main` that touches anything
-outside `paths-ignore` (`*.md`, `docs/**`, `.claude/**`) is a real deploy, and the board goes live
-behind Access at that moment. Nothing has been pushed yet.
+**Steps 1–4 are done (2026-08-31), except the one check step 4 cannot force: the first cron tick.
+Step 5 remains.** The Access app exists, both repo secrets are set, all four tables are in D1,
+both Workers are deployed green with every gate's evidence recorded below, `gw2.itguys.ro` is live
+and returning 302 to the Access login, and `0 * * * *` is confirmed registered on the account.
 
-State right now: `main` is on the Workers code, the k3s CronJob is still running on its
-last-applied manifest, and both are writing nothing to each other. The old board keeps working
-until step 5.
+**Not yet observed: a completed scheduled invocation.** `craft_roi` is still empty. Nothing is
+wrong — the deploy simply landed after the 09:00 tick. Confirm at the next one, per step 4 check 2.
+
+State right now: both Workers are live, the k3s CronJob is *also* still running on its
+last-applied manifest, and the two are writing to different databases — the Worker to D1, the
+CronJob to Postgres. That double-write is harmless and is the rollback margin; it ends at step 5.
+The old Grafana board keeps working until then.
 
 ### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST) — **DONE 2026-08-31**
 
@@ -767,21 +771,29 @@ backslash separates the two paths — COPY emits it, `SELECT` never does; it wen
 trusting that, all 29,691 statements were applied into a real SQLite database (0 failures) and all
 27,144 `def` blobs `JSON.parse`d (0 failures).
 
-### Step 4 — First deploy
+### Step 4 — First deploy — **deploy DONE 2026-08-31, first cron tick still unobserved**
 
 ```sh
 gh workflow run deploy.yml --repo dustfeather/gw2roi     # or just push
 ```
 
-What each gate actually proves, and what it does not:
+What each gate actually proves, and what it does not — with what run `33376999032`
+(push `9d7f179`) actually printed:
 
-| gate | proves |
-|---|---|
-| typecheck | the workspace compiles |
-| bundle gzip (pre-deploy, `--dry-run`) | ≤ 600 KiB cron / 900 KiB web. Measured 42.7 / 64.6 KiB, so this is a creep alarm, not a live constraint |
-| `wrangler secret list` | `ARENA_NET_KEY` actually landed on `gw2-roi-cron` |
-| startup time (post-deploy) | the script parsed and initialised under 400 ms — **the version is already live when this runs** |
-| `expect-crons` | `0 * * * *` is registered on the account, not merely present in a config file |
+| gate | proves | measured |
+|---|---|---|
+| typecheck | the workspace compiles | pass |
+| bundle gzip (pre-deploy, `--dry-run`) | ≤ 600 KiB cron / 900 KiB web. This is a creep alarm, not a live constraint | 42.73 / 64.59 KiB |
+| `wrangler secret list` | `ARENA_NET_KEY` actually landed on `gw2-roi-cron` | `All staged secrets present on the Worker: ARENA_NET_KEY`, from a live `secret list --format json` diff |
+| startup time (post-deploy) | the script parsed and initialised under 400 ms — **the version is already live when this runs** | 2 ms cron / 5 ms web |
+| `expect-crons` | `0 * * * *` is registered on the account, not merely present in a config file | `Registered on gw2-roi-cron: 0 * * * *` — a live read of `GET /workers/scripts/gw2-roi-cron/schedules` |
+| `deploy-web` deploy output | the custom domain attached and the binding exists | `gw2.itguys.ro (custom domain)`, `env.DB (gw2)` |
+
+Migrations were a no-op (`✅ No migrations to apply!`) because `0000_organic_stryfe.sql` had
+already been applied by hand when the database was created. No `::warning::` line fired in either
+job. The steps showing `skipped` on `deploy-web` — pre-deploy, the three secret steps, the cron
+assertion — are `if:` conditionals on inputs that are *supposed* to be empty for a `fetch()`-only
+Worker with no secrets and no triggers, not gates that silently failed to run.
 
 Neither Worker sets `verify-url`: the cron Worker has no HTTP surface, and the board is behind
 Access so an unauthenticated curl would 302 and fail every deploy. **A green run therefore does
@@ -802,6 +814,28 @@ not prove the board renders or that the job works.** Check by hand:
 
    A timestamp inside the last hour means a real scheduled invocation completed. Expect 3-ish
    rows — a thin board is a velocity-gate artifact, not a failure.
+
+**Result of check 1 — the gate is live and is provably this app.** `curl -sI` returns
+`HTTP/2 302` to `itguys.cloudflareaccess.com/cdn-cgi/access/login/gw2.itguys.ro`, and the
+redirect's `kid` is `ec4873364b91ff3be22dd286710c6cd1eed4637629fac7a33d42e60dfa38b5b6` — the
+`aud` of the application created in step 1, so the refusal is being enforced by *that* app and not
+by some other one that happens to match. The meta JWT carries `auth_status: NONE` and
+`service_token_status: false`, i.e. the unauthenticated case is correctly refused. `gw2.itguys.ro`
+resolves to `188.114.96.8` / `188.114.97.8`, Cloudflare anycast, confirming the record wrangler
+created is **proxied** — the precondition the whole gate depends on (see the corollary in step 1).
+
+**Result of check 2 — not yet satisfied, and this is the important caveat.** As of 09:24 UTC
+`craft_roi` and `craft_roi_learnable` are both **0 rows**: the deploy landed after the 09:00 tick,
+so no scheduled invocation has run yet. `account_balance`'s newest row is 08:00:17, which is
+imported Postgres history, not a Worker write.
+
+**A green run does not prove the job works, and here it demonstrably has not run yet.** Every gate
+above is satisfied by a deploy that never executes: `expect-crons` proves the schedule is
+*registered*, and startup time proves the isolate *initialises*, but neither proves `scheduled()`
+completes against the real GW2 API and writes D1. The first honest signal is a `craft_roi` row
+with an `updated_at` inside the last hour. Until then the board renders with empty tables — the
+graph will still draw, because it reads the imported `tp_transactions` / `account_balance`, which
+is itself a reason not to mistake a rendering board for a working pipeline.
 
 ### Step 5 — Tear down k3s (by hand, after step 4 is confirmed)
 

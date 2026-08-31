@@ -61,10 +61,16 @@ jobs:
       install-dir: .
       runner: arc-df-gw2roi
       pnpm-version: "10.33.4"
-      # Migrations run BEFORE the new code goes live, and only here — deploy-web is gated on
-      # this job, so the board never deploys against an unmigrated schema. Under the old
-      # inline-DDL model the first invocation after a deploy carried the DDL, which turned a
-      # schema failure into a failed *run* rather than a failed *deploy*.
+      # Migrations run BEFORE the new code goes live, and only here. Under the old inline-DDL
+      # model the first invocation after a deploy carried the DDL, which turned a schema failure
+      # into a failed *run* rather than a failed *deploy*.
+      #
+      # deploy-web no longer waits on this job, so the two deploys race: the board can go live a
+      # few seconds before a pending migration finishes. That is a deliberate trade for wall
+      # time. It only bites on a deploy that BOTH adds a migration AND ships web code depending
+      # on it, and it self-heals on the next request once the migration lands. If that stops
+      # being acceptable, the fix is a separate `migrate` job that both deploys declare in
+      # `needs`, not restoring the deploy-cron -> deploy-web chain.
       pre-deploy-command: npx wrangler d1 migrations apply gw2 --remote
       max-gzip-kib: 600
       max-startup-ms: 400
@@ -81,7 +87,9 @@ jobs:
         ARENA_NET_KEY=${{ secrets.ARENA_NET_KEY }}
 
   deploy-web:
-    needs: deploy-cron
+    # Parallel with deploy-cron, both gated only on typecheck. See the migration note above for
+    # what that gives up.
+    needs: typecheck
     permissions:
       contents: read
     uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v4

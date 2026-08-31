@@ -338,7 +338,7 @@ deploy-cron:
       ARENA_NET_KEY=${{ secrets.ARENA_NET_KEY }}
 
 deploy-web:
-  needs: deploy-cron
+  needs: typecheck                      # parallel with deploy-cron (was: needs: deploy-cron)
   uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v4
   with:
     working-dir: apps/web
@@ -355,8 +355,18 @@ deploy-web:
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
-Migrations run once, in the cron job's `pre-deploy-command`; `deploy-web` is gated on it so the
-board never deploys against an unmigrated schema.
+Migrations run once, in the cron job's `pre-deploy-command`.
+
+**Changed 2026-08-31: the two deploys now run in parallel**, both gated only on `typecheck`.
+Originally `deploy-web` declared `needs: deploy-cron` precisely so the board could never deploy
+against an unmigrated schema. That guarantee is gone, traded for wall time on a single-node runner.
+
+The exposure is narrow and worth stating exactly: it bites only on a deploy that *both* adds a
+migration *and* ships board code that depends on it, the window is the few seconds between the two
+jobs, and it self-heals on the next request once the migration lands. If that ever stops being
+acceptable, the fix is a separate `migrate` job that both deploys list in `needs` — not restoring
+the `deploy-cron` → `deploy-web` chain, which serialises the deploys to buy an ordering guarantee
+that a dedicated job gives for free.
 
 **Neither Worker sets `verify-url`.** The deliberate scope of the deploy gate here is *did the
 deployment go through*, not *does the app answer*. That is already fully covered by `wrangler

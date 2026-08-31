@@ -165,8 +165,10 @@ source of truth — `.github/workflows/deploy.yml` ships it onto the Worker with
 ## CI/CD
 
 Push to `main` (deny-list `paths-ignore`, not an allow-list) → `deploy.yml`: typecheck gate, then
-two `deploy-cloudflare.yml@v4` callers on the ARC runner `arc-df-gw2roi`. `deploy-web` needs
-`deploy-cron`, so the board never deploys against an unmigrated schema. `checks.yml` covers PRs.
+two `deploy-cloudflare.yml@v4` callers on the ARC runner `arc-df-gw2roi`. Both deploys are gated
+only on `typecheck` and **run in parallel**; `deploy-web` used to wait on `deploy-cron` so the
+board could never deploy against an unmigrated schema, and that ordering guarantee was traded away
+for wall time. `checks.yml` covers PRs.
 
 - Migrations run once, in the cron job's `pre-deploy-command`.
 - **`expect-crons: 0 * * * *`** is the gate that matters here. A cron-only Worker has no HTTP

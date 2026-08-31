@@ -1,16 +1,12 @@
 {
+  // Root project = the local-only tooling: `scripts/` (Bun) and drizzle.config.ts.
+  // The two Workers and packages/core have their own projects, typechecked by
+  // `pnpm -r typecheck`; nothing here ships to Cloudflare.
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "types": ["bun-types", "node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
-    "noEmit": true
+    // @cloudflare/workers-types is here only because scripts/ imports @gw2/core, whose db.ts
+    // is typed against the D1 binding. Nothing under scripts/ runs on Workers.
+    "types": ["node", "bun-types", "@cloudflare/workers-types"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["scripts/**/*.ts", "drizzle.config.ts"]
 }

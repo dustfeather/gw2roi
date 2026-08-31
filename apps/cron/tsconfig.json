@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No `node` types: this project ships to Workers, where `process` does not exist. Leaving
+    // @types/node out is what makes a stray `process.env` a compile error rather than a
+    // runtime one.
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "gw2-roi-web",
+  "main": "src/worker.tsx",
+  "compatibility_date": "2026-08-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+
+  // Wrangler creates this proxied DNS record itself on the first deploy. Do NOT hand-create the
+  // record first — the custom-domain binding fails if one already exists (§6).
+  "routes": [{ "pattern": "gw2.itguys.ro", "custom_domain": true }],
+
+  // The Tailwind build output is imported as a string, the `invest` pattern. It is the only
+  // static asset the board has, so there is no `assets` binding: one CSS file does not need a
+  // second serving mechanism, and the Text module versions and rolls back with the deploy
+  // exactly as an asset would.
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"] }],
+
+  // Read-only half. No ARENA_NET_KEY here — the board never talks to the GW2 API.
+  // TODO(cutover §7): replace database_id once `wrangler d1 create gw2` has run.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gw2",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../drizzle"
+    }
+  ]
+}

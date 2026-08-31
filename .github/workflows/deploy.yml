@@ -1,97 +1,104 @@
 name: deploy
 
-# A shim over dustfeather/shared-workflows' deploy-k8s.yml. GitHub is still the
-# single source of truth for cluster secrets; the shared workflow runs on the
-# in-cluster ARC runner (SA arc-df-gw2roi-gha-rs-no-permission, bound to the
-# gw2-ci-deployer Role), pushes GitHub Actions Secrets into the trading ns, and
-# applies the ConfigMap + CronJob. kubectl uses the pod's in-cluster config.
+# Two Workers, deployed by dustfeather/shared-workflows' deploy-cloudflare.yml.
 #
-# This repo was carved out of issue #18's rollout because it needs TWO distinct
-# Secrets, one of them mixing secret and non-secret literals — which a single
-# SECRET_LITERALS blob cannot express. The shared workflow's SECRETS_MANIFEST
-# input is what closed that gap: one blob, a `[name]` header per Secret.
+#   gw2-roi-cron  scheduled() only, no route, holds ARENA_NET_KEY, writes D1
+#   gw2-roi-web   fetch() only, custom domain gw2.itguys.ro behind Access, reads D1
 #
 # Required GitHub Actions Secrets (Settings > Secrets and variables > Actions):
-#   ARENA_NET_KEY   - ArenaNet API key (account,characters,unlocks,inventories scopes)
-#   PG_PASSWORD     - password for the dedicated Postgres (bot + StatefulSet share it)
-# (Grafana provisioning is local-only — see scripts/provision-grafana.sh; no GH secret needed.)
+#   ARENA_NET_KEY          - ArenaNet API key (account,characters,unlocks,inventories,
+#                            tradingpost,wallet scopes). Shipped onto the cron Worker with
+#                            the deploy via WORKER_SECRETS.
+#   CLOUDFLARE_API_TOKEN   - Workers + D1 edit
+#   CLOUDFLARE_ACCOUNT_ID
 #
-# NOT deployed here (bootstrap once with admin kubeconfig — Role lacks these verbs):
-#   k8s/rbac.yaml, k8s/postgres.yaml, the arc-df-gw2roi runner scale set.
+# NOT done here (one-off, by hand): creating the D1 database, importing the cutover dumps,
+# and creating the Access application + custom domain. See docs/PLAN-cloudflare-migration.md §7.
 
 on:
-  # After a new image is built...
-  workflow_run:
-    workflows: ["build-and-push"]
-    types: [completed]
-    branches: [main]
-  # ...and independently, whenever the manifests themselves change. Without this trigger a
-  # manifest-only commit reaches the cluster only if some *other* commit happens to rebuild
-  # the image: build-and-push filters on src/**, data/**, Dockerfile, package.json, so
-  # editing k8s/cronjob.yaml alone fires nothing at all. That is how the 2026-08-10 CronJob
-  # retry fix sat committed and unapplied while every slow hour kept stranding itself.
   push:
     branches: [main]
-    paths:
-      - "k8s/**"
-      - "scripts/kick-init-job.sh"
-      - ".github/workflows/deploy.yml"
+    # A deny-list, not an allow-list: failing closed on documentation is cheap, failing open
+    # on code is not. The old k8s deploy needed a second `paths:` trigger precisely because an
+    # allow-list let manifest-only commits reach main unapplied.
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - ".claude/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Not cancel-in-progress: a cancelled deploy could leave the two Workers on different commits.
 concurrency:
-  group: deploy-gw2roi
+  group: deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    # Gate only the image-driven path on a green build. A push/dispatch deploy applies the
-    # manifests already in git against whatever image is current, so a red or rate-limited
-    # build must not be able to block it.
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+  # Gates both deploys. There is no test suite and no linter — typecheck is the only check,
+  # and it is the same one the pre-commit hook runs.
+  typecheck:
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-k8s.yml@v4
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v4
     with:
-      namespace: trading
-      runner: arc-df-gw2roi # in-cluster ARC runner scale set (create at bootstrap)
-      # `none`, not the `get` default: gw2-ci-deployer is a namespace-scoped
-      # Role, and reading a Namespace is a cluster-scoped verb it does not have.
-      # The previous hand-written job never checked either.
-      ensure-namespace: none
-      manifests: |
-        k8s/configmap.yaml
-        k8s/cronjob.yaml
-      # The StatefulSet itself is bootstrap-only, so this waits on an object
-      # this job did not apply — deliberately. The init job below writes to
-      # Postgres, so a deploy that raced it would fail for a reason that has
-      # nothing to do with the deploy.
-      rollout-targets: statefulset/gw2-postgres
-      rollout-timeout: 180s
-      # Runs after the rollout wait, and a non-zero exit fails the deploy:
-      # populate craft_roi now rather than leaving the table empty until the
-      # next scheduled slot.
-      verify-command: bash scripts/kick-init-job.sh
-      show-command: kubectl get cronjob gw2-crafting-roi -o wide
+      runner: arc-df-gw2roi
+      pnpm-version: "10.33.4"
+      run-typecheck: true
+      run-lint: false
+      run-test: false
+      run-audit: false
+
+  deploy-cron:
+    needs: typecheck
+    permissions:
+      contents: read
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v4
+    with:
+      working-dir: apps/cron
+      # Monorepo: the lockfile and node_modules live at the root, the wrangler config does not.
+      install-dir: .
+      runner: arc-df-gw2roi
+      pnpm-version: "10.33.4"
+      # Migrations run BEFORE the new code goes live, and only here — deploy-web is gated on
+      # this job, so the board never deploys against an unmigrated schema. Under the old
+      # inline-DDL model the first invocation after a deploy carried the DDL, which turned a
+      # schema failure into a failed *run* rather than a failed *deploy*.
+      pre-deploy-command: npx wrangler d1 migrations apply gw2 --remote
+      max-gzip-kib: 600
+      max-startup-ms: 400
+      # The gate that matters for a cron-only Worker. wrangler treats an absent `triggers`
+      # block as "leave whatever is registered alone", so a misplaced or unread config section
+      # deploys clean with zero schedules and surfaces an hour later as "the job never ran".
+      # This asserts the end state on the account after the upload.
+      expect-crons: 0 * * * *
+      # No verify-url: this Worker has no HTTP route by design.
     secrets:
-      # Two Secrets, hence SECRETS_MANIFEST rather than secret-name +
-      # SECRET_LITERALS. gw2-postgres-creds mixes the password with the
-      # non-secret user and database names on purpose: it is consumed by BOTH
-      # the StatefulSet and the bot, which expect one Secret, not two.
-      SECRETS_MANIFEST: |
-        [gw2-api-key]
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_SECRETS: |
         ARENA_NET_KEY=${{ secrets.ARENA_NET_KEY }}
 
-        [gw2-postgres-creds]
-        POSTGRES_USER=gw2
-        POSTGRES_DB=gw2
-        POSTGRES_PASSWORD=${{ secrets.PG_PASSWORD }}
-        PGUSER=gw2
-        PGDATABASE=gw2
-        PGPASSWORD=${{ secrets.PG_PASSWORD }}
-
-  # Grafana dashboards/datasource are NOT provisioned from CI.
-  # They live in git (k8s/grafana/dashboards/) and are pushed on demand,
-  # locally, via: scripts/provision-grafana.sh  (reads GRAFANA_API_KEY + PG_PASSWORD from .env)
+  deploy-web:
+    needs: deploy-cron
+    permissions:
+      contents: read
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v4
+    with:
+      working-dir: apps/web
+      install-dir: .
+      runner: arc-df-gw2roi
+      pnpm-version: "10.33.4"
+      # Rebuilds the committed Tailwind Text module, so a class added in a .tsx cannot ship
+      # against stale CSS.
+      build-command: pnpm build:css
+      max-gzip-kib: 900
+      max-startup-ms: 400
+      # No verify-url: the board is behind Cloudflare Access, so an unauthenticated curl gets
+      # a 302 to the login page and would fail every deploy. The deploy gate's scope here is
+      # "did the deployment go through", which wrangler's exit code plus the size and startup
+      # gates already cover.
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

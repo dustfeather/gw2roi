@@ -1,12 +1,19 @@
 #!/bin/sh
-# gw2: validate staged JSON files (Grafana dashboards, configs) before commit.
-# A malformed dashboard JSON would silently break `scripts/provision-grafana.sh`.
-# Bypass with GW2_SKIP_JSON_CHECK=1.
+# gw2: validate staged JSON, then typecheck. Typecheck is the only check this repo has —
+# there is no test suite and no linter.
+#
+# Bypass with GW2_SKIP_JSON_CHECK=1 / GW2_SKIP_TSC=1.
+#
+# Two kinds of file are skipped because they are JSON *with comments*, which jq rejects:
+# wrangler.jsonc (not matched by the `\.json$` anchor) and tsconfig*.json (excluded below —
+# TypeScript parses those as JSONC, and `tsc` fails on a malformed one anyway).
+# What is left is what actually needs the check: data/*.json, which the cost model reads every
+# run, and drizzle/meta/*.json, the migration ledger.
 [ "${GW2_SKIP_JSON_CHECK:-0}" = "1" ] && exit 0
 command -v jq >/dev/null 2>&1 || { echo "pre-commit: jq not found, skipping JSON validation"; exit 0; }
 
 fail=0
-for f in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.json$'); do
+for f in $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.json$' | grep -v '/tsconfig[^/]*\.json$' | grep -v '^tsconfig[^/]*\.json$'); do
   [ -f "$f" ] || continue
   if ! jq empty "$f" >/dev/null 2>&1; then
     echo "pre-commit: invalid JSON -> $f"
@@ -17,16 +24,17 @@ done
 
 [ "$fail" = "0" ] || { echo "pre-commit: aborted — fix the JSON above (or GW2_SKIP_JSON_CHECK=1 to bypass)"; exit 1; }
 
-# TypeScript typecheck. Bypass with GW2_SKIP_TSC=1.
-if [ "${GW2_SKIP_TSC:-0}" != "1" ] && git diff --cached --name-only --diff-filter=ACM | grep -qE '\.ts$'; then
-  if command -v bun >/dev/null 2>&1; then
+# TypeScript typecheck across the workspace (root scripts + both Workers + packages/core).
+# Bypass with GW2_SKIP_TSC=1.
+if [ "${GW2_SKIP_TSC:-0}" != "1" ] && git diff --cached --name-only --diff-filter=ACM | grep -qE '\.tsx?$'; then
+  if command -v pnpm >/dev/null 2>&1; then
     echo "pre-commit: running typecheck…"
-    if ! bun run typecheck; then
+    if ! pnpm typecheck; then
       echo "pre-commit: aborted — typecheck failed (or GW2_SKIP_TSC=1 to bypass)"
       exit 1
     fi
   else
-    echo "pre-commit: bun not found, skipping typecheck"
+    echo "pre-commit: pnpm not found, skipping typecheck"
   fi
 fi
 

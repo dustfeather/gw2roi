@@ -1,0 +1,57 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "gw2-roi-cron",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-01",
+
+  // No `routes`, no `workers_dev`: the only entrypoint is scheduled(). This Worker holds
+  // ARENA_NET_KEY and makes the account-authenticated GW2 calls, so it has no HTTP surface at
+  // all — not one guarded by Access, none. A dashboard redeploy also cannot disturb it.
+  "workers_dev": false,
+
+  // nodejs_compat is deliberately OFF (§3). Nothing here needs it once `process.env` is gone,
+  // and it costs isolate startup against the hard 1 s limit. Turn it on only if something
+  // concrete breaks.
+
+  "observability": { "enabled": true },
+
+  // Hourly, matching the k3s CronJob this replaces. CI asserts these are actually registered
+  // after the deploy (`expect-crons` in .github/workflows/deploy.yml): wrangler treats an
+  // absent `triggers` block as "leave what is there alone", so a misplaced one deploys green
+  // with zero schedules and only shows up an hour later as "the job never ran".
+  "triggers": { "crons": ["0 * * * *"] },
+
+  // Non-secret tuning (§10), formerly k8s/configmap.yaml. ARENA_NET_KEY is a Worker secret and
+  // is NOT here. Values are strings so buildConfig() sees exactly what the ConfigMap fed it.
+  "vars": {
+    "TOP_N": "100",
+    "TP_KEEP_RATIO": "0.85",
+    // Trailing window the demand velocity is averaged over: 1d | 2d | 7d. The gates below stay
+    // per-DAY whichever window is picked.
+    "VELOCITY_WINDOW": "7d",
+    "GATE_MIN_SELL_SOLD_DAY": "10",
+    // Listed sell-side supply ahead of you, in days. Was 7, which sat BELOW the entire
+    // distribution of otherwise-qualifying recipes (p10 = 12.3d) and admitted ~nothing except
+    // on a 1d-velocity noise spike. 14 keeps only the fastest-clearing decile.
+    "GATE_MAX_DAYS_TO_SELL": "14",
+    "GATE_MIN_ROI_PCT": "10",
+    "GATE_MIN_PROFIT_COPPER": "100",
+    // Definitions are cached in D1 (recipe_defs / item_defs) and only topped up: ids the cache
+    // has never seen, plus this many oldest-first re-reads per run. 600/run turns the whole
+    // table over in about a day. Raise it to converge faster after a game patch; 0 disables
+    // refresh entirely (new ids are still always fetched).
+    "RECIPE_REFRESH_PER_RUN": "600"
+  },
+
+  // TODO(cutover §7): replace database_id once `wrangler d1 create gw2` has run. The id is not
+  // a secret — it is inert without CLOUDFLARE_API_TOKEN, the same category as a bucket name —
+  // so it is committed rather than templated.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gw2",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../drizzle"
+    }
+  ]
+}

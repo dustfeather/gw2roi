@@ -2,3 +2,10 @@ node_modules/
 .env
 graphify-out/
 *.log
+
+# wrangler's local state and dry-run output
+.wrangler/
+.wrangler-budget/
+
+# scripts/seed-cache.ts working directory: ~25 MB of definition dumps, deliberately not in git
+.seed/

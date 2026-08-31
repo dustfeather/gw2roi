@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* Tailwind v4 has no config file: the sources it scans for class names are declared here.
+   Everything that emits markup lives under src/, so one glob covers it. */
+@source "../**/*.tsx";

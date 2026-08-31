@@ -1,7 +1,7 @@
 // ROI ranking (§5) + gates (§6). All money in copper.
 import type { Recipe } from "./gw2api.ts";
 import type { TpData } from "./datawars.ts";
-import { config } from "./config.ts";
+import type { Config } from "./config.ts";
 import { type CostMemo, type CostModel, craftCost, outOfPocketCost } from "./cost.ts";
 
 export interface RoiRow {
@@ -44,6 +44,7 @@ export interface Scored {
 // Both figures come off the SAME model and memo: the out-of-pocket pass re-walks the plan the
 // market pass already chose, paying market price only for what held stock cannot cover.
 export function scoreRecipe(
+  cfg: Config,
   model: CostModel,
   r: Recipe,
   memo: CostMemo,
@@ -56,7 +57,7 @@ export function scoreRecipe(
   if (cost === null || cost <= 0) return null; // bad leaf -> disqualified in cost model
 
   const outCount = r.output_item_count > 0 ? r.output_item_count : 1;
-  const keep = config.tpKeepRatio;
+  const keep = cfg.tpKeepRatio;
 
   // All values are per single output item; craftCost() already returns per-item
   // cost (ingredient total / output_item_count), so no outCount scaling here.
@@ -106,7 +107,7 @@ export function scoreRecipe(
   // Gates judge market-true economics only (§6) — deliberately NOT net_profit/net_roi_pct.
   // Owning mats must reorder recipes that already clear the bar, never float a break-even
   // recipe onto the board just because its ingredients happen to be in the bank.
-  const g = config.gates;
+  const g = cfg.gates;
   const passes =
     out.sell_price > 0 && // output sellable
     out.sell_sold_day >= g.minSellSoldDay && // demand velocity, units/day

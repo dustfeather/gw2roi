@@ -2,19 +2,25 @@ name: checks
 
 on:
   pull_request:
-# Push-to-main typecheck runs inside build-and-push (gates the image build),
+# Push-to-main typecheck runs inside deploy.yml, where it gates the deploy,
 # so this workflow only needs to cover PRs.
 
 permissions:
   contents: read
 
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   node:
-    # Reusable node CI from shared-workflows. bun.lock present -> auto-detects bun,
-    # runs `bun run typecheck`. Only typecheck is meaningful here (no lint/test scripts).
+    # Reusable node CI from shared-workflows. pnpm-lock.yaml present -> auto-detects pnpm,
+    # runs `pnpm typecheck`, which recurses into both Workers and packages/core.
+    # Only typecheck is meaningful here (no lint or test scripts in this repo).
     uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v4
     with:
-      runner: ubuntu-latest
+      runner: arc-df-gw2roi
+      pnpm-version: "10.33.4"
       run-typecheck: true
       run-lint: false
       run-test: false

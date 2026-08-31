@@ -345,13 +345,23 @@ proving every runtime secret landed.
 Consequence accepted: a wrong D1 binding name, broken SQL, or a throwing SSR template ships
 green and surfaces on first use rather than in CI.
 
-**One genuine gap, filed upstream against `shared-workflows`:** nothing asserts that a
-**Cron Trigger was actually registered**. For `gw2-roi-cron`, whose only entrypoint is
-`scheduled()`, every existing gate misses it — `verify-url` has nothing to curl, the gzip gate
-runs pre-deploy, the startup gate proves the script parsed rather than that its triggers
-installed, and the secret check proves secrets landed. A cron-only Worker can therefore deploy
-green with `triggers.crons` silently unregistered, and the failure appears an hour later as "the
-job never ran", with no failed workflow run to point at.
+**One genuine gap, filed upstream as
+[shared-workflows#22](https://github.com/dustfeather/shared-workflows/issues/22):** nothing
+asserts that a **Cron Trigger was actually registered**. For `gw2-roi-cron`, whose only
+entrypoint is `scheduled()`, every existing gate misses it — `verify-url` has nothing to curl
+(and its step is skipped outright when the input is empty), the gzip gate runs pre-deploy, the
+startup gate proves the script parsed rather than that its triggers installed, and the secret
+check proves secrets landed. A cron-only Worker can therefore deploy green with `triggers.crons`
+silently unregistered, and the failure appears an hour later as "the job never ran", with no
+failed workflow run to point at. Cloudflare's documented behaviour makes this easy to hit: an
+`undefined` `triggers`/`crons` block leaves existing triggers in place and errors on nothing, so
+a misplaced or unread config section deploys clean with zero schedules.
+
+**Constraint that follows: `apps/cron` must deploy with plain `wrangler deploy`.** Do not
+override `deploy-command` to `wrangler versions upload` — the shared workflow supports that path
+and appends `--secrets-file` so secrets still land, but triggers get no equivalent handling.
+Under `versions upload`, crons are applied only by a separate, still-`[experimental]`,
+`wrangler triggers deploy`, so they would register never.
 
 `ARENA_NET_KEY` stays a GitHub Actions Secret and is the single source of truth, shipped via
 `WORKER_SECRETS`. `PG_PASSWORD` is deleted after cutover.
@@ -409,9 +419,14 @@ all describe the k3s/Postgres shape).
 
 ## 9. Open items
 
-- `shared-workflows`: cron-trigger registration is unverifiable at deploy time (§6). Filed
-  upstream; does not block this migration, but until it lands a silently-unregistered cron is
-  only detectable by noticing the board has stopped updating.
+- `shared-workflows`: cron-trigger registration is unverifiable at deploy time (§6). Filed as
+  [#22](https://github.com/dustfeather/shared-workflows/issues/22); does not block this
+  migration, but until it lands a silently-unregistered cron is only detectable by noticing the
+  board has stopped updating.
+- Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. They
+  exist on `dosar-rapid.ro`, but repo secrets do not cross repos and `dustfeather` is a User
+  account, so there is no org tier to inherit from. `gw2roi` currently holds only
+  `ARENA_NET_KEY` and `PG_PASSWORD`, with zero environments and zero variables.
 - Re-measure peak memory after the next large game expansion — it tracks `item_defs` row count
   against a fixed 128 MB ceiling.
 - Optional follow-up: the throttle serializes to **1 in-flight request**, using ~4.8 of the

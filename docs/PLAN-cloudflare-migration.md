@@ -885,8 +885,21 @@ flipping one boolean:
 **The suspend is DONE (2026-08-31 11:27) and was not optional.** It is written here as the first
 step of teardown, but it turned out to be a *precondition for the Worker to function at all* —
 while both were scheduled on `0 * * * *` with the same ArenaNet key, the Worker lost the
-rate-limit race every hour and threw (see step 4). Everything below the suspend is still pending
-and still gated on seeing the Worker write D1 successfully.
+rate-limit race every hour and threw (see step 4).
+
+**The CronJob itself is also DELETED (2026-08-31 11:33), ahead of the order below.** Everything
+else in `trading` is deliberately untouched, and verified so: the `gw2-postgres` StatefulSet, its
+Service, the PVC `data-gw2-postgres-0`, the `gw2-api-key` and `gw2-postgres-creds` secrets and the
+`gw2-roi-config` configmap all remain.
+
+That changes what rollback costs, which is worth stating plainly rather than discovering later:
+suspended, rollback was one boolean. Deleted, the object is gone, so resuming the old pipeline
+means re-applying the manifest — one `git revert c5bfbea` away, but needing an admin kubeconfig,
+because the deployer Role never had the verbs for it (see Rollback). **The data rollback is
+unaffected**: Postgres and its PVC still hold everything, and that is the part that cannot be
+recreated.
+
+Everything below is still pending and still gated on seeing the Worker write D1 successfully.
 
 ```sh
 kubectl -n trading patch cronjob gw2-crafting-roi -p '{"spec":{"suspend":true}}'

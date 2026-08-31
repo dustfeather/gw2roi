@@ -81,12 +81,17 @@ Monorepo matching `dosar-rapid.ro`, which is the shape `deploy-cloudflare.yml` w
 
 ```
 apps/cron/          wrangler.jsonc, src/worker.ts     → scheduled() only
-apps/web/           wrangler.jsonc, src/worker.tsx    → fetch() only, custom domain, assets
-packages/core/      cost.ts roi.ts gw2api.ts datawars.ts config.ts schema.ts db.ts types.ts
+apps/web/           wrangler.jsonc, src/worker.tsx    → fetch() only, custom domain
+packages/core/      cost.ts roi.ts gw2api.ts datawars.ts config.ts schema.ts db.ts fmt.ts
 data/               coin-vendor.json, free-mats.json   (bundled, 365 B + 514 B)
 drizzle/            generated migrations
 scripts/            seed-cache.ts (stays local Bun)
 ```
+
+*As built:* `packages/core` has no `types.ts` — the row types come from the Drizzle schema
+(`typeof craftRoi.$inferSelect`) and everything else already lived beside its module. `fmt.ts`
+took its place, holding the `fmt_coin` replacement. `index.ts` is the barrel both Workers import.
+pnpm workspaces with `workspace:*` deps and no tsconfig `paths`, matching dosar-rapid.
 
 `packages/core` holds the actual value — the cost model and the gates. Both Workers import it:
 cron to write, web to read and render.
@@ -186,6 +191,11 @@ chunked alternative would be ~270 queries against D1's 100-bound-parameter cap.
 
 Billing: 27k rows/run × 720 runs = **19M rows read/month** against 25B included.
 
+*As built:* the oldest-first refresh slice is no longer a query either. `stalestDefIds` was
+`SELECT id … WHERE id = ANY($1) ORDER BY fetched_at LIMIT n`, which has the same array-parameter
+problem as the read above; since the full scan already returns every row's `fetched_at`, the slice
+is picked in memory from those rows. Two queries per run total, not four.
+
 ### Writes
 
 D1 caps **bound parameters at 100 per query**. `craft_roi` has 18 columns → **5 rows per
@@ -203,8 +213,15 @@ against 50M included.
 
 **Hono + JSX, server-rendered on `gw2-roi-web`.** SSR keeps the D1 binding server-side; no token
 or query ever reaches the client. 200 rows, one hourly snapshot, no time filter — React would
-buy nothing and cost a hydration pipeline. `invest` is the house precedent: a plain Hono Worker
-on a custom domain, no framework.
+buy nothing and cost a hydration pipeline. `invest` is the house precedent: a plain Worker on a
+custom domain, no framework.
+
+**Correction:** this plan said `invest` was "a plain Hono Worker". It is not — `invest` is a
+hand-rolled `export default { fetch }` with an `if (method && pathname)` chain, HTML from template
+literals, and a manual `escape()`. There is no Hono and no JSX anywhere in it. The decision here
+stands anyway (Hono routes the four paths and JSX escapes by default, which is the half of
+`invest` that is hand-written and easy to get wrong), but it is a new dependency for this repo
+rather than a house convention being followed.
 
 **Same five panels as the Grafana board**, relaid out: stat row across the top, full-width TP
 cumulative graph, then **CRAFTABLE NOW and LEARNABLE side by side in one row**.
@@ -227,6 +244,12 @@ Static assets ship through **Workers Static Assets** (`assets` binding): request
 free and unlimited, they version with the deploy and roll back with it, and edge caching plus
 ETags are handled. R2 is for large or user-supplied blobs; these are build outputs. Item icons
 come from `render.guildwars2.com`, so we link rather than host them.
+
+*As built: no `assets` binding.* Once the CSS is a committed Text module (the paragraph above),
+that CSS is the **only** static asset the board has — the page ships zero JavaScript, no fonts and
+no images. A second serving mechanism for one file buys nothing: the Text module already versions
+and rolls back with the deploy, and it is served from a route with a content-hashed immutable
+`Cache-Control`. Add the binding the day a real asset appears.
 
 `data/coin-vendor.json` and `data/free-mats.json` stay **bundled**, not in R2 — 879 bytes total
 of git-versioned constants the cost model reads every run. R2 would add a binding, two
@@ -345,9 +368,17 @@ proving every runtime secret landed.
 Consequence accepted: a wrong D1 binding name, broken SQL, or a throwing SSR template ships
 green and surfaces on first use rather than in CI.
 
-**One genuine gap, filed upstream as
-[shared-workflows#22](https://github.com/dustfeather/shared-workflows/issues/22):** nothing
-asserts that a **Cron Trigger was actually registered**. For `gw2-roi-cron`, whose only
+**~~One genuine gap~~ — closed before this migration landed.** `shared-workflows` shipped
+`expect-crons` (commit `eee5f3e`, "feat(deploy-cloudflare): assert Cron Triggers registered"),
+which is reachable at `@v4` today but is **not in any `v4.x.y` semver tag** — `v4.9.1` predates
+it. `deploy.yml` sets `expect-crons: 0 * * * *`; after the upload the job reads
+`GET /accounts/{id}/workers/scripts/{name}/schedules` and fails naming anything missing. It
+asserts the end state on the account rather than parsing wrangler output, so it covers the
+`versions upload` path too. No new credential: the endpoint takes Workers Scripts Read, which the
+deploy token already exceeds. The original gap description follows, because the *reason* it
+existed is still the reason `apps/cron` must not switch deploy commands:
+
+Nothing else asserts that a **Cron Trigger was actually registered**. For `gw2-roi-cron`, whose only
 entrypoint is `scheduled()`, every existing gate misses it — `verify-url` has nothing to curl
 (and its step is skipped outright when the input is empty), the gzip gate runs pre-deploy, the
 startup gate proves the script parsed rather than that its triggers installed, and the secret
@@ -372,11 +403,12 @@ Under `versions upload`, crons are applied only by a separate, still-`[experimen
 
 Big-bang. k3s is left running and **stopped by hand** afterwards.
 
-1. **Dump all four tables** from Postgres — `COPY … TO STDOUT CSV`, timestamps converted to
-   epoch ms. Commit `tp_transactions` (1,886 rows / 248 kB) and `account_balance`
-   (657 rows / 88 kB) to the repo: they are small and **irreplaceable**
+1. **Dump all four tables** from Postgres — `bash scripts/export-pg.sh`, which port-forwards to
+   the cluster and emits SQLite-compatible `INSERT`s with timestamps converted to epoch ms. It
+   writes `tp_transactions` (1,886 rows / 248 kB) and `account_balance` (657 rows / 88 kB) to
+   `cutover/`, to be **committed**: they are small and **irreplaceable**
    (`/v2/account/wallet` returns only the current balance, so `account_balance` is the only
-   balance history that will ever exist). Keep the 25 MB def dumps out of git.
+   balance history that will ever exist). The 25 MB def dumps go to the gitignored `.seed/`.
 2. Create D1 database `gw2`; `drizzle-kit generate` the initial migration; apply it.
 3. **Import all four tables** via `wrangler d1 execute --file` (5 GB import limit; the whole DB
    is 33 MB). Importing the def caches is what keeps the first Worker run off the 858 s path.
@@ -419,10 +451,10 @@ all describe the k3s/Postgres shape).
 
 ## 9. Open items
 
-- `shared-workflows`: cron-trigger registration is unverifiable at deploy time (§6). Filed as
-  [#22](https://github.com/dustfeather/shared-workflows/issues/22); does not block this
-  migration, but until it lands a silently-unregistered cron is only detectable by noticing the
-  board has stopped updating.
+- ~~`shared-workflows`: cron-trigger registration is unverifiable at deploy time.~~ **Done** —
+  `expect-crons` landed as [#22](https://github.com/dustfeather/shared-workflows/issues/22) and
+  `deploy.yml` uses it (§6). Note `@v4` is a *moving* tag: the feature is on it now but in no
+  semver tag yet, so a caller pinned to `@v4.9.1` would silently not have it.
 - Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. They
   exist on `dosar-rapid.ro`, but repo secrets do not cross repos and `dustfeather` is a User
   account, so there is no org tier to inherit from. `gw2roi` currently holds only
@@ -432,3 +464,36 @@ all describe the k3s/Postgres shape).
 - Optional follow-up: the throttle serializes to **1 in-flight request**, using ~4.8 of the
   5 req/s GW2 budget. Raising concurrency toward 5 (still under the 6-connection cap) would cut
   the dominant cost of every run. Out of scope here; noted because the measurement made it visible.
+
+---
+
+## 10. Status — 2026-08-31
+
+**Done, in the repo, typechecking:**
+
+- §3 monorepo layout, pnpm workspaces, `tsconfig.base.json`. `src/` is gone.
+- §3 runtime port: `buildConfig(env)`, `createGw2Client(cfg)`, `scheduled()`, throw-not-exit-code.
+  A fifth item the plan did not anticipate: `timing.ts` accumulated phases in module scope, which
+  is **per isolate** on Workers, so a warm isolate reported the previous run's milliseconds added
+  to its own. It resets at the top of the handler now.
+- §4 Drizzle schema, generated migration `drizzle/0000_organic_stryfe.sql`, `fmtCoin` in TS,
+  5-rows-per-INSERT writes inside one `db.batch()` per table, full-scan def reads.
+- §5 board: Hono + JSX, inline-SVG graph, two-up tables, Tailwind Text module.
+- §6 CI: both `deploy-cloudflare.yml@v4` callers, `expect-crons` wired, typecheck gate.
+- §7 step 1 tooling: `scripts/export-pg.sh`. `scripts/seed-cache.{ts,sh}` repointed at D1.
+- §8 deletions: `k8s/**`, `Dockerfile`, `build.yml`, the three cluster/Grafana scripts.
+  `DESIGN.md` §7–§11 rewritten, `CLAUDE.md` rewritten, `README.md` rewritten.
+
+**Not done — every remaining item needs live credentials or a dashboard click:**
+
+1. `wrangler d1 create gw2`, then paste the real `database_id` into **both** `wrangler.jsonc`
+   files (they currently carry an all-zeros placeholder, so a deploy would fail).
+2. Add `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets (§9).
+3. Run `scripts/export-pg.sh`, commit `cutover/*.sql`, apply migrations, import all four tables
+   (defs first).
+4. Create the Access application for `gw2.itguys.ro` and attach the two existing policies (§6).
+5. Merge to `main` → first deploy. Verify the board renders and the first cron invocation
+   completes.
+6. By hand afterwards: suspend the k3s CronJob, delete the PVC, the `gw2-postgres-creds` secret
+   and the GHCR image. Nothing in CI touches the cluster any more, so the old CronJob keeps
+   running on its last-applied manifest until it is stopped.

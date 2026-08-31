@@ -1,6 +1,7 @@
 # GW2 Crafting-ROI Bot — Design
 
-Surfaces the **top-N craftable items by profit per craft**, hourly, into Grafana.
+Surfaces the **top-N craftable items by profit per craft**, hourly, onto a board at
+`gw2.itguys.ro`.
 (Rank key changed from ROI% to absolute profit on 2026-07-26 — ROI remains a gate and a
 displayed figure. Selection and display must share a key or top-N silently picks a
 different set than the board renders.) Every decision below was resolved in the `/grill-me` interview.
@@ -73,7 +74,7 @@ Also displayed per row (context, not ranking):
 
 ---
 
-## 6. Gates (all ConfigMap-tunable unless noted)
+## 6. Gates (all tunable via `vars` in `apps/cron/wrangler.jsonc` unless noted)
 
 | Gate | Default | Meaning |
 |---|---|---|
@@ -88,61 +89,124 @@ Also displayed per row (context, not ranking):
 
 ## 7. Deployment
 
-- **Schedule:** k3s **CronJob**, `0 * * * *` (hourly), namespace `trading`.
-- **Image:** **node 26 + Bun runtime**, pushed to **ghcr.io**. No browser — plain HTTP + JSON only, so image stays small.
-  - Pure-JS `pg` (no `pg-native`) — sidesteps node26 native-module break.
-  - Native `fetch` for HTTP (GW2 API + datawars2).
-  - Coin-vendor prices from bundled JSON — no scrape at runtime.
-- **Tag:** `:latest`, `imagePullPolicy: Always`.
-- **Build:** GitHub Actions on the self-hosted **ARC runner** → push ghcr.
-- **Manifest apply:** `kubectl apply` / `set image` **from the ARC runner** (in-cluster SA). Mirrors the `rebalance` bot.
-  - **RBAC pattern (confirmed 2026-07-23):** each repo gets a dedicated ARC runner SA `arc-<repo>-gha-rs-no-permission` in `arc-runners` + a namespaced Role/RoleBinding in `trading`. Copy the existing `alpaca-ci-deployer` Role (verbs `get,list,create,update,patch,delete` on `batch/cronjobs`; `get,create,update,patch` on `secrets`) — it already fits a CronJob-only deploy, no `deployments` verbs needed. **No gw2 runner SA exists yet** → create the runner scale set + `gw2-ci-deployer` Role/RoleBinding at setup.
-- **Registry path:** `ghcr.io/dustfeather/<image>` (ghcr-pull owner = `dustfeather`).
-- **Registry auth:** reuse `secret/ghcr-pull` (dockerconfigjson, in `trading`, 54d). `cronjob/ghcr-refresh` (`node:24-alpine`, `node /scripts/refresh.cjs`) is **currently SUSPENDED** — ghcr-pull is a long-lived PAT dockerconfig, so the refresher is only needed if that PAT rotates. Un-suspend only if pulls start 401'ing.
+Migrated off k3s to Cloudflare on 2026-08-31 — see `docs/PLAN-cloudflare-migration.md` for the
+measurements that reversed the earlier "keep the job in k3s" call. The k3s footprint is zero.
+
+- **Two Workers, not one.**
+  - `gw2-roi-cron` — `scheduled()` only, **no route and no custom domain**, so it has no public
+    surface by construction rather than by policy. It holds `ARENA_NET_KEY` and makes the
+    account-authenticated GW2 calls. A dashboard redeploy cannot disturb the hourly job.
+  - `gw2-roi-web` — `fetch()` only, custom domain `gw2.itguys.ro`, reads D1 and renders.
+  - Both bind the same D1 database. D1 bindings are not exclusive.
+- **Schedule:** Cloudflare **Cron Trigger** `0 * * * *` on `gw2-roi-cron`. `scheduled()` is not an
+  HTTP request, so it never passes through the Access edge.
+- **No image.** wrangler bundles the TypeScript; there is no Dockerfile, no GHCR, no pull secret.
+- **`nodejs_compat` is deliberately OFF** — a divergence from the sibling repos, which need it for
+  Next.js/opennext. Nothing here requires it once `process.env` is gone, and it costs isolate
+  startup against the hard 1 s limit.
+- **CI:** two `dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v4` callers on
+  the in-cluster ARC runner `arc-df-gw2roi`, `deploy-web` gated on `deploy-cron` so the board never
+  deploys against an unmigrated schema.
+  - Migrations run once, as the cron job's `pre-deploy-command`, i.e. **before** the new code is
+    live. Under the old inline-DDL model the first invocation after a deploy carried the DDL, so a
+    schema failure surfaced as a failed *run* rather than a failed *deploy*.
+  - `expect-crons: 0 * * * *` is what covers a cron-only Worker. `verify-url` has nothing to curl,
+    and wrangler treats an absent `triggers` block as "leave whatever is registered alone" — so a
+    misplaced or unread config section deploys green with zero schedules, and the failure only
+    shows up an hour later as "the job never ran".
+  - **`apps/cron` must deploy with plain `wrangler deploy`.** Under `wrangler versions upload`
+    crons are applied only by a separate, still-experimental `wrangler triggers deploy`, so they
+    would register never.
+- **Secrets:** `ARENA_NET_KEY` stays a GitHub Actions Secret and is the single source of truth,
+  shipped onto the Worker with the deploy via `WORKER_SECRETS` (wrangler `--secrets-file`, so the
+  credentials attach to the version being uploaded rather than to a later one).
 
 ---
 
-## 8. Storage
+## 8. Storage — Cloudflare D1
 
-- **Dedicated Postgres 17**, `trading` ns: **StatefulSet + 1Gi PVC + creds Secret**, single replica.
-- **Single table**, `CREATE TABLE IF NOT EXISTS` on boot; **TRUNCATE + INSERT** each run (**latest-only**, no history).
+One database, `gw2`. Six tables, all declared in `packages/core/schema.ts` (Drizzle) and applied
+as numbered migrations from `drizzle/`.
 
-Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copper, profit_copper, sell_price, buy_price, instant_flip_copper, optimal_cost_copper, days_to_sell, sell_velocity, sell_supply, computed_at`.
+| Table | Lifecycle |
+|---|---|
+| `craft_roi`, `craft_roi_learnable` | **latest-only** — DELETE + chunked INSERT per run, one `db.batch()` each, so the board is never observed half-written |
+| `tp_transactions` | **accumulate-only** (insert-or-ignore by id), so history survives the API's ~90-day window |
+| `account_balance` | **accumulate-only**, one wallet snapshot per run — `/v2/account/wallet` returns only the *current* balance, so this is the only balance history that will ever exist. Never truncate it. |
+| `recipe_defs`, `item_defs` | self-maintaining definition caches: unseen ids plus a `RECIPE_REFRESH_PER_RUN` oldest-first slice per run |
+
+Type mapping from the Postgres original: `bigint`→`INTEGER` (coin values and txn ids are far
+inside 2^53), `double precision`→`REAL`, `jsonb`→`TEXT`, `timestamptz`→`INTEGER` epoch
+**milliseconds**, `TRUNCATE`→`DELETE FROM`. `fmt_coin()` was a PL/pgSQL function; SQLite has no
+stored functions, so it is `fmtCoin()` in `packages/core/fmt.ts` and formatting happens at render.
+
+Two D1 limits shape the write path: **100 bound parameters per query** (so `craft_roi` inserts 5
+rows at a time across 18 columns) and **`db.batch()` runs as one implicit transaction** (so the
+DELETE and every INSERT for a table go in a single call). Definition upserts write `fetched_at` as
+a SQL expression rather than a bound value, which doubles rows per statement.
+
+Reads of the def caches are **full-table scans**, two queries a run. The old `WHERE id = ANY($1)`
+in 5,000-id chunks was a Postgres artifact: the pipeline reads essentially the whole cache every
+run, and SQLite has no array parameter.
 
 ---
 
-## 9. UI — Grafana (implemented via HTTP API)
+## 9. UI — server-rendered board on `gw2.itguys.ro`
 
-- Grafana in `monitoring` ns, `grafana/grafana:12.3.1`, **Helm-managed** (grafana chart 10.5.15) — single `grafana` container, **no provisioning sidecar**. Because it's Helm-managed, any hand-edit to the `grafana` datasources ConfigMap is reverted on the next `helm upgrade`, so the ConfigMap route was **dropped**.
-- **Real path = Grafana HTTP API**, driven by `scripts/provision-grafana.sh` (idempotent create-or-update). Uses service account token `ci-dashboard-push` (`GRAFANA_API_KEY`). SA granted `datasources:create/write` + dashboard rights.
-  - **Postgres datasource** uid `gw2-postgres`, url `gw2-postgres.trading.svc.cluster.local:5432`, db/user `gw2`, `sslmode=disable`, password = `PG_PASSWORD`. Script health-checks Grafana→PG after upsert.
-  - **Dashboard** uid `gw2-craft-roi`, model in `k8s/grafana/dashboards/gw2-roi.json` (canonical), pushed via `POST /api/dashboards/db` overwrite. Stat row (count / best profit / last-updated) + table panel `ORDER BY profit DESC`. Item name column links to a GW2Efficiency TP **name search** (`?filter.search.term=<name:percentencode>`) — the bot resolves output item names (`/v2/items`) for the top-N and stores `output_item_name`.
-  - **Run locally on demand**, not from CI: `set -a; . ./.env; set +a; bash scripts/provision-grafana.sh`. Dashboards persist in Grafana + in git (`k8s/grafana/dashboards/`); CI stays out of Grafana. No `GRAFANA_API_KEY` GH secret.
-  - Stale `k8s/grafana/*.yaml` (ConfigMap datasource + dashboard-provider) kept only as the sidecar-based fallback; not applied.
+Grafana is gone. The board is `gw2-roi-web`: **Hono + JSX, server-rendered**, zero client
+JavaScript, so the D1 binding, the queries and the whole ledger stay server-side.
+
+- **Same five panels as the Grafana board, relaid out:** stat row across the top, full-width
+  cumulative TP graph (inline SVG, generated server-side), then **CRAFTABLE NOW and LEARNABLE side
+  by side**. The two-up row is deliberate — the velocity gates routinely leave three rows in one
+  table, and stacking two of those under a full-width graph looks broken.
+- **`net_profit` is the single rank key**: top-N selection in the pipeline, both table sorts, and
+  the headline stat. Market-true `profit` is displayed but does not rank. ROI stays a gate and a
+  displayed figure, never a rank key.
+- **No time filter**, deliberately: `craft_roi` is latest-only, so every row shares one
+  `updated_at` and there is nothing to filter across. The cumulative graph reads the
+  accumulate-only tables and plots their whole history.
+- Item links: the gw2efficiency crafting calculator by item id (known), the wiki recipe page by
+  name (learnable — vendor and currency are not in the GW2 API at all).
+- **Styling:** Tailwind, built by `@tailwindcss/cli` into a committed `.css.txt` and loaded as a
+  Text module. One CSS file is the only static asset, so there is no `assets` binding.
+- **Access:** the hostname is covered by its own Cloudflare Access application. This is a real
+  exposure change — the Grafana host was an unproxied WARP-mesh address, unreachable from the
+  internet by network topology, whereas on a Worker Access is the only control and the board
+  renders `account_balance` and the full `tp_transactions` ledger.
 
 ---
 
 ## 10. Configuration surface
 
-- **ConfigMap:** gate thresholds (`min_sell_sold`, `max_days_to_sell`, `min_roi_pct`, `min_profit_copper`), `top_n`, discipline whitelist, static recipe/item cache TTLs. Coin-vendor mat prices ship as a bundled JSON (in-image, no TTL).
-- **Secret:** `ARENA_NET_KEY`, Postgres creds.
-- **Code-fixed:** recursion, 15% TP fee, log level, dry-run flag.
+- **`vars` in `apps/cron/wrangler.jsonc`:** `TOP_N`, `TP_KEEP_RATIO`, `VELOCITY_WINDOW`, the four
+  gate thresholds, `RECIPE_REFRESH_PER_RUN`. Coin-vendor and free-mat prices ship as bundled JSON
+  (879 bytes of git-versioned constants, read every run — not in R2).
+- **Worker secret:** `ARENA_NET_KEY`, from the GitHub Actions Secret of the same name.
+- **Code-fixed:** recursion, 15% TP fee, request throttle, chunk sizes.
+
+Config is built by `buildConfig(env)` **inside the handler**. Workers deliver env as a handler
+argument and have no `process.env`, so there is no module-scope config const to read at import.
 
 ---
 
-## 11. Run pipeline (per CronJob execution)
+## 11. Run pipeline (per Cron Trigger invocation)
 
-1. Load config (env/ConfigMap) + secrets.
-2. GW2: pull characters → max discipline ratings; pull unlocked + searchable recipes; filter to craftable-now set.
+1. `buildConfig(env)` — throws on a missing key, which fails the invocation in milliseconds rather
+   than after a full pipeline's worth of API calls.
+2. GW2: pull characters → max discipline ratings; pull unlocked recipes + the full recipe id list;
+   split into `known` (craftable now) and `learnable` (disciplines qualify, not unlocked).
 3. Collect all output item ids + full ingredient closure ids.
 4. datawars2: bulk-fetch prices + velocity for every id.
-5. Load bundled coin-vendor + free-mat JSON tables (in-memory, no fetch). Free mats = account-bound bulk mats (Bloodstone Dust, Dragonite Ore, Empyreal Fragment) priced at 0 — can't be TP-bought/sold or crafted, accumulate for free.
+5. Load bundled coin-vendor + free-mat JSON tables (in-memory, no fetch). Free mats = account-bound
+   bulk mats (Bloodstone Dust, Dragonite Ore, Empyreal Fragment) priced at 0 — can't be
+   TP-bought/sold or crafted, accumulate for free.
 6. Recursive cheapest-source cost per candidate; disqualify on bad leaves.
-7. Compute ROI + instant-flip + optimal figures.
+7. Compute market-true ROI, then re-walk the same plan for the out-of-pocket figures (§5).
 8. Apply gates.
-9. Sort desc, take top-N.
-10. `TRUNCATE` + `INSERT` into Postgres.
-11. Grafana reads live.
+9. Sort by `net_profit` desc, take top-N.
+10. DELETE + INSERT both ROI tables; append new transactions and one wallet snapshot.
+11. The board reads D1 live on the next request.
 
 ---
 
@@ -164,7 +228,19 @@ Proposed columns: `item_id, name, discipline, roi_pct, cost_copper, revenue_copp
 
 ---
 
-## Status — 2026-07-23 (implemented & live)
+## Status — 2026-08-31 (migrated to Cloudflare)
+
+The job, the database and the dashboard all moved to Cloudflare; §7–§11 above describe the shape
+that is now live. What follows below is the k3s-era record, kept because the reasoning behind the
+cost model and the gates is still the reasoning in force — only the deployment substrate changed.
+
+Anything below this line describing a CronJob, a Postgres StatefulSet, GHCR or Grafana is
+**historical**. The measurements that reversed the original "keep the job in k3s, reach D1 over
+REST" decision are in `docs/PLAN-cloudflare-migration.md` §1.
+
+---
+
+## Status — 2026-07-23 (implemented & live, k3s era)
 
 Bot **built, deployed, and confirmed writing to Postgres** end-to-end. Deploy run `29982787684` green; `craft_roi` populated live.
 

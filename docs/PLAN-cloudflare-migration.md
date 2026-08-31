@@ -277,8 +277,8 @@ fails. Making it pass would need a `Bypass` policy — and policies attach to an
 not to individual destinations, so that would make `itguys.ro/api/automation/posts` publicly
 reachable with no authentication. Per Cloudflare's docs, Bypass "disables any Access enforcement
 … and requests are not logged", is evaluated **before** Allow and Block, and cannot be narrowed
-by identity. No `/health` endpoint is built at all — §6 verifies the board root instead, which
-exercises more.
+by identity. No `/health` endpoint is built at all: the deploy gate does not check whether the
+app answers (§6), so nothing needs an unauthenticated path.
 
 ### DNS
 
@@ -324,7 +324,9 @@ deploy-web:
     build-command: <tailwind cli build>
     max-gzip-kib: 900
     max-startup-ms: 400
-    verify-url: https://gw2.itguys.ro/
+    # no verify-url: what matters is that the deploy succeeded, not that the
+    # page answers — and the board is behind Access, so an unauthenticated
+    # curl would get a 302 to the login page and fail every deploy
   secrets:
     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -333,17 +335,23 @@ deploy-web:
 Migrations run once, in the cron job's `pre-deploy-command`; `deploy-web` is gated on it so the
 board never deploys against an unmigrated schema.
 
-Gates already provided by the shared workflow: bundle gzip size (pre-deploy `--dry-run`), startup
-time (post-deploy — `wrangler` only reports it on real upload; catches `10021 Script startup
-exceeded CPU time limit`), and a post-deploy `wrangler secret list` proving every runtime secret
-landed.
+**Neither Worker sets `verify-url`.** The deliberate scope of the deploy gate here is *did the
+deployment go through*, not *does the app answer*. That is already fully covered by `wrangler
+deploy`'s exit code plus the three gates the shared workflow provides: bundle gzip size
+(pre-deploy `--dry-run`), startup time (post-deploy — `wrangler` only reports it on real upload;
+catches `10021 Script startup exceeded CPU time limit`), and a post-deploy `wrangler secret list`
+proving every runtime secret landed.
 
-**One change needed in `shared-workflows`:** the verify step is a bare `curl` with no header
-support, so it cannot authenticate past Access. Add a `verify-headers` secret input. Then
-`verify-url` points at the board root `/` with the existing `github-actions-automation` service
-token (`8b5ba88b….access`, no expiry) — which renders the real page and runs the real D1
-queries, closing the one gap the other gates leave open (wrong binding name, broken SQL, SSR
-throw). Generally useful: any repo deploying behind Access hits it.
+Consequence accepted: a wrong D1 binding name, broken SQL, or a throwing SSR template ships
+green and surfaces on first use rather than in CI.
+
+**One genuine gap, filed upstream against `shared-workflows`:** nothing asserts that a
+**Cron Trigger was actually registered**. For `gw2-roi-cron`, whose only entrypoint is
+`scheduled()`, every existing gate misses it — `verify-url` has nothing to curl, the gzip gate
+runs pre-deploy, the startup gate proves the script parsed rather than that its triggers
+installed, and the secret check proves secrets landed. A cron-only Worker can therefore deploy
+green with `triggers.crons` silently unregistered, and the failure appears an hour later as "the
+job never ran", with no failed workflow run to point at.
 
 `ARENA_NET_KEY` stays a GitHub Actions Secret and is the single source of truth, shipped via
 `WORKER_SECRETS`. `PG_PASSWORD` is deleted after cutover.
@@ -401,7 +409,9 @@ all describe the k3s/Postgres shape).
 
 ## 9. Open items
 
-- `shared-workflows`: add the `verify-headers` input (§6). Blocks `deploy-web` verification only.
+- `shared-workflows`: cron-trigger registration is unverifiable at deploy time (§6). Filed
+  upstream; does not block this migration, but until it lands a silently-unregistered cron is
+  only detectable by noticing the board has stopped updating.
 - Re-measure peak memory after the next large game expansion — it tracks `item_defs` row count
   against a fixed 128 MB ceiling.
 - Optional follow-up: the throttle serializes to **1 in-flight request**, using ~4.8 of the

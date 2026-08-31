@@ -1,8 +1,0 @@
-node_modules
-graphify-out
-graphify.md
-.env
-*.md
-.git
-k8s
-.github

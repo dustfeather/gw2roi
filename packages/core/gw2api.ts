@@ -101,6 +101,11 @@ export function createGw2Client(cfg: Config): Gw2Client {
 
   async function getJson<T>(path: string, auth: boolean): Promise<T> {
     const url = path.startsWith("http") ? path : `${cfg.gw2ApiBase}${path}`;
+    // What each retryable attempt actually returned. Without this the failure message only
+    // enumerated `429/5xx/authed 400`, so an exhausted retry budget was indistinguishable
+    // between a rate limit and a fast 5xx from the proxy in front of the API — the two have
+    // the same wall-clock signature and completely different fixes.
+    const attempts: string[] = [];
     for (let attempt = 0; attempt < 5; attempt++) {
       await throttle();
       const res = await fetch(url, {
@@ -111,8 +116,17 @@ export function createGw2Client(cfg: Config): Gw2Client {
       // is ErrTimeout/ErrBadData, not a malformed request, so the same call succeeds later.
       // Unauthenticated 400s (bad ids) are genuine and still fail fast.
       if (res.status === 429 || res.status >= 500 || (res.status === 400 && auth)) {
-        const backoff = 1000 * (attempt + 1);
-        await new Promise((r) => setTimeout(r, backoff));
+        // ArenaNet rate-limits per IP (300 burst, 5/s refill) and advertises the bucket in
+        // these headers, so they say whether we are throttled and how hard.
+        const h = (n: string) => res.headers.get(n) ?? "-";
+        attempts.push(
+          res.status === 429
+            ? `429(retry-after=${h("retry-after")} limit=${h("x-rate-limit-limit")} remaining=${h("x-rate-limit-remaining")})`
+            : String(res.status),
+        );
+        // No point sleeping after the final attempt — the loop is about to exit and throw.
+        // That backoff was 5 s of the ~15.8 s every failed run spent.
+        if (attempt < 4) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }
       if (!res.ok) {
@@ -123,7 +137,7 @@ export function createGw2Client(cfg: Config): Gw2Client {
       }
       return (await res.json()) as T;
     }
-    throw new Error(`gw2 still failing after retries (429/5xx/authed 400): ${url}`);
+    throw new Error(`gw2 still failing after retries [${attempts.join(", ")}]: ${url}`);
   }
 
   // Fetch every definition for a big id list, chunked by 200. `onPage` is awaited after each

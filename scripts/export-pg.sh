@@ -92,8 +92,13 @@ bad=0
 for f in "$ROOT/cutover/tp_transactions.sql" "$ROOT/cutover/account_balance.sql" \
          "$ROOT/.seed/recipe_defs.sql" "$ROOT/.seed/item_defs.sql"; do
   n_e=$(grep -c "E'" "$f" || true)          # quote_literal() escape-string prefix
-  n_nl=$(grep -c '\\n' "$f" || true)        # COPY-escaped newline, i.e. COPY crept back in
-  [ "$n_e" -eq 0 ] && [ "$n_nl" -eq 0 ] || { echo "!! $(basename "$f"): ${n_e} E'-literals, ${n_nl} lines with a literal \\n" >&2; bad=1; }
+  # The tell for COPY is the DOUBLED backslash, not a literal `\n`. Grepping for `\n` cannot
+  # distinguish COPY's escaped newline from a genuine JSON one, and 155 item descriptions really
+  # do carry `\n` ("+10% Damage vs. Undead\n-10% Damage from Undead"), so that test fires on 912
+  # good lines. COPY doubles every backslash it passes; the SELECT path emits none — 927 -> 0
+  # across these four dumps.
+  n_bs=$(grep -c '\\\\' "$f" || true)
+  [ "$n_e" -eq 0 ] && [ "$n_bs" -eq 0 ] || { echo "!! $(basename "$f"): ${n_e} E'-literals, ${n_bs} lines with a doubled backslash" >&2; bad=1; }
 done
 [ "$bad" -eq 0 ] || { echo "!! refusing to hand these to wrangler — fix the dump first" >&2; exit 1; }
 echo "   clean"

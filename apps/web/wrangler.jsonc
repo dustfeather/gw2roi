@@ -14,7 +14,9 @@
   // static asset the board has, so there is no `assets` binding: one CSS file does not need a
   // second serving mechanism, and the Text module versions and rolls back with the deploy
   // exactly as an asset would.
-  "rules": [{ "type": "Text", "globs": ["**/*.txt"] }],
+  // `fallthrough` matters: wrangler ships a DEFAULT Text rule covering .txt/.html/.sql, and an
+  // explicit rule without it replaces that default outright (and warns).
+  "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }],
 
   // Read-only half. No ARENA_NET_KEY here — the board never talks to the GW2 API.
   // TODO(cutover §7): replace database_id once `wrangler d1 create gw2` has run.

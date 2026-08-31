@@ -9,3 +9,4 @@ graphify-out/
 
 # scripts/seed-cache.ts working directory: ~25 MB of definition dumps, deliberately not in git
 .seed/
+.dev.vars

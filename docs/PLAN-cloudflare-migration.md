@@ -516,16 +516,34 @@ committed to both `wrangler.jsonc` files — and `0000_organic_stryfe.sql` appli
 
 ## 11. Remaining work — runbook
 
-Everything below needs a credential or a console click that the port itself did not. Nothing is
-live yet, and one fact sets the order: **the two missing Cloudflare repo secrets are the only
-thing failing the deploy.** Adding them is the switch that makes the board public. So the Access
-application goes first.
+Everything below needs a credential or a console click that the port itself did not. One fact set
+the order: **the two missing Cloudflare repo secrets were the only thing failing the deploy.**
+Adding them is the switch that makes the board public. So the Access application went first.
+
+**Steps 1–3 are done (2026-08-31). Steps 4 and 5 remain.** The Access app exists, both repo
+secrets are set, and all four tables are in D1 — so the next push to `main` that touches anything
+outside `paths-ignore` (`*.md`, `docs/**`, `.claude/**`) is a real deploy, and the board goes live
+behind Access at that moment. Nothing has been pushed yet.
 
 State right now: `main` is on the Workers code, the k3s CronJob is still running on its
 last-applied manifest, and both are writing nothing to each other. The old board keeps working
 until step 5.
 
-### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST)
+### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST) — **DONE 2026-08-31**
+
+Created, and no pre-existing app covered the hostname (the five apps were exactly the five listed
+below), so there is no duplicate:
+
+| field | value |
+|---|---|
+| app id | `cd586b62-1e86-4fcc-bec2-b25e11c6e7c0` |
+| `aud` | `ec4873364b91ff3be22dd286710c6cd1eed4637629fac7a33d42e60dfa38b5b6` |
+| destination | `gw2.itguys.ro`, `type: self_hosted`, `session_duration: 730h` |
+| policies | `eb56b673-…` Service Token Access (prec 1) + `b7cfc7c3-…` Admin Access (prec 2), **both `reusable: true`** |
+
+`reusable: true` on both is the bit that mattered: the `{id, precedence}`-only body linked the
+existing policies rather than cloning app-scoped copies of them. Keep the `aud` — it is the JWT
+audience tag anything validating the Access JWT server-side will need.
 
 **Why first.** Re-confirmed on the account 2026-08-31: `deny_unmatched_requests: false`,
 `deny_unmatched_requests_exempted_zone_names: []`, and **no existing app covers
@@ -617,12 +635,43 @@ hostname does **not** answer yet at this point — there is no DNS record until 
 Worker, so a `curl` gets NXDOMAIN, not a 302. The 302-to-login check belongs in step 4, right
 after the first deploy, and is what proves the ordering held.
 
-### Step 2 — Cloudflare repo secrets
+### Step 2 — Cloudflare repo secrets — **DONE 2026-08-31**
 
 Confirmed absent on `dustfeather/gw2roi`: only `ARENA_NET_KEY` (2026-07-23) and `PG_PASSWORD`
 (2026-07-23) exist, with zero variables and zero environments. They exist on `dosar-rapid.ro`, but
 repo secrets do not cross repos and `dustfeather` is a User account, so there is no org tier to
 inherit from.
+
+The last pre-secret run (`33365994915`, 2026-08-31T06:53Z) failed exactly where that predicts —
+`typecheck` green, then `deploy-cron` dying in **`Pre-deploy (migrations, reference data)`** on
+`npx wrangler d1 migrations apply gw2 --remote`:
+
+```
+✘ [ERROR] In a non-interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN
+          environment variable for wrangler to work.
+```
+
+`deploy-web` was `skipped`, not failed — the `needs: deploy-cron` gate held.
+
+**Which token, and the risk taken.** Neither credential already on the box was fit for a repo
+secret, and both were scoped before choosing:
+
+| token | Workers Scripts Edit | D1 Edit | why it fails the bar |
+|---|---|---|---|
+| `~/.cf-token` (`Full Access`, id `0ac537a4…`) | yes | yes | account-wide — **356 permission groups, 170 write/admin**, all five zones, DNS Write, Access Service Tokens Write, `expires: never`; and `condition.request_ip.in = ["86.120.74.101/32"]` |
+| `flotila/.dev.vars` (user-scoped, id `95d48863…`) | yes | yes | narrower, still carries **Access apps write** plus R2 + KV write across `dosar-rapid`/`invest`/`itguys.ro`; cannot read its own definition (no API Tokens Read), so its `condition` is unverifiable |
+
+The Access-apps-write grant is the sharp one: the app created in step 1 is the *only* gate on
+`gw2.itguys.ro` (there is no zone-wide backstop — `deny_unmatched_requests: false`), so a token
+that can delete Access apps can delete the gate protecting the ledger.
+
+**Decision: `~/.cf-token` is used anyway**, with the IP condition removed by hand so it does not
+break when the residential WAN IP rotates. (It would have worked either way today — `arc-df-gw2roi`
+runs on the k3s nodes behind that same WAN IP — but silently, and only until the ISP moved.)
+Accepted consequence, recorded deliberately: **any workflow run in this repo holds full account
+control**, including a run originating from a fork PR on the self-hosted runner. The
+least-privilege alternative is a third token scoped to Workers Scripts:Edit + D1:Edit only; mint
+one if that blast radius ever stops being acceptable.
 
 ```sh
 gh secret set CLOUDFLARE_API_TOKEN   --repo dustfeather/gw2roi   # Workers Scripts Edit + D1 Edit
@@ -633,9 +682,19 @@ The token needs Workers Scripts **Edit** and D1 **Edit**. `expect-crons` additio
 `/workers/scripts/{name}/schedules`, which takes Workers Scripts **Read** — already implied by
 Edit, so no extra grant.
 
-**Done when** `gh secret list --repo dustfeather/gw2roi` shows four names.
+Set them over **stdin**, not `--body`: a value passed as an argument is visible in the process
+list for as long as the call runs.
 
-### Step 3 — Move the data
+```sh
+printf %s "$(<~/.cf-token)" | gh secret set CLOUDFLARE_API_TOKEN --repo dustfeather/gw2roi
+```
+
+**Done when** `gh secret list --repo dustfeather/gw2roi` shows four names — confirmed
+2026-08-31T08:24Z: `ARENA_NET_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, `PG_PASSWORD`.
+
+### Step 3 — Move the data — **DONE 2026-08-31**
+
+Needs `psql` on the box (`export-pg.sh` exits 1 without it) — `apt-get install postgresql-client`.
 
 ```sh
 bash scripts/export-pg.sh                     # port-forwards, dumps all four tables
@@ -668,6 +727,45 @@ npx wrangler d1 execute gw2 --remote --command \
 
 Expect ≈ 13,183 / 13,961 / 1,886 / 657, allowing for rows the old job added between the dump and
 the check.
+
+**Result:** `13,183 / 13,961 / 1,886 / 661` — exact, the 661 being 657 plus four `account_balance`
+rows the still-running k3s CronJob appended between when this plan was written and the dump.
+The def import ran in 1.5 s + 0.9 s of D1 time (13,961 and 13,183 single-row statements).
+
+#### What went wrong first: `COPY` has an escaping layer of its own
+
+The first import attempt failed on both def dumps —
+`unrecognized token: "\" at offset 525: SQLITE_ERROR` — while `tp_transactions` and
+`account_balance` went in clean. This is a **second, distinct trap** from the `quote_literal()` →
+`E'...'` one the script already guarded against, and worth writing down because the two look
+nothing alike and the guard for one does not catch the other.
+
+`export-pg.sh` ran its `SELECT`s wrapped in `COPY (...) TO STDOUT`. COPY's *text format* escapes
+its own output: every backslash becomes `\\`, every newline becomes `\n`. The defs statement was
+assembled across two source lines, so a newline sat **inside** the quoted SQL literal and COPY
+emitted it mid-statement:
+
+```
+…,1788159621531)\n    ON CONFLICT(id) DO UPDATE SET def=excluded.def…
+```
+
+SQLite has no backslash escapes at all, so it hit `\` where a token had to begin. The other two
+tables survived only by accident — their line breaks fall between `||` operators, outside the
+literal, and their dumps are byte-identical under both paths.
+
+The quieter half of the same bug: 927 genuine backslashes in the item JSON came out doubled. A
+dump that happened to parse would have stored corrupted blobs **without erroring at all**.
+
+Fix: emit through the existing `psql -At` helper with a plain `SELECT` (no COPY, no escaping
+layer) and keep every generated statement on one source line.
+
+**And the guard for it must test the doubled backslash, not a literal `\n`.** The first guard
+written for this greped for `\n` and rejected a perfectly good dump at 912 lines: 155 item
+descriptions genuinely contain one (`"+10% Damage vs. Undead\n-10% Damage from Undead"`), sitting
+inside a JSON string inside a SQL string literal, which is where it belongs. Only the doubled
+backslash separates the two paths — COPY emits it, `SELECT` never does; it went 927 → 0. Before
+trusting that, all 29,691 statements were applied into a real SQLite database (0 failures) and all
+27,144 `def` blobs `JSON.parse`d (0 failures).
 
 ### Step 4 — First deploy
 

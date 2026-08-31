@@ -17,9 +17,20 @@
 #
 # Timestamps are converted to epoch MILLISECONDS here, matching the D1 schema (§4).
 #
-# Escaping note: text is quoted by doubling single quotes rather than with `quote_literal()`.
-# Postgres emits an `E'...'` prefix when a string contains a backslash, and SQLite rejects that —
-# item names and JSON definitions contain plenty of backslashes.
+# Escaping note, part 1: text is quoted by doubling single quotes rather than with
+# `quote_literal()`. Postgres emits an `E'...'` prefix when a string contains a backslash, and
+# SQLite rejects that — item names and JSON definitions contain plenty of backslashes.
+#
+# Escaping note, part 2: the rows are emitted with a plain `SELECT` through `psql -At`, NOT with
+# `COPY (...) TO STDOUT`. COPY's text format has an escaping layer of its own — it rewrites every
+# backslash as `\\` and every newline as `\n`. Both are wrong here. SQLite has no backslash
+# escapes at all, so `\\` would silently store two characters into 13k JSON blobs, and a `\n`
+# landing outside a string literal fails the whole import with
+# `unrecognized token: "\" at offset N: SQLITE_ERROR`. That is exactly what happened on the first
+# cutover attempt: the defs statement was built across two source lines, so the newline sat INSIDE
+# the quoted literal and COPY escaped it. The other two tables survived only because their line
+# breaks fall between `||` operators. Each generated statement is therefore kept on ONE line
+# below, and psql passes the bytes through unaltered.
 #
 # Usage:  bash scripts/export-pg.sh
 # Env overrides: KCTX (kube context), NS (namespace), LOCAL_PORT
@@ -60,24 +71,32 @@ pg() { psql -h 127.0.0.1 -p "$LOCAL_PORT" -U "$PGUSER" -d "$PGDATABASE" -At -c "
 q() { echo "'''' || replace($1::text, '''', '''''') || ''''"; }
 ms() { echo "(extract(epoch from $1)*1000)::bigint"; }
 
+# Every generated statement stays on a single line: any newline inside the quoted SQL literal
+# would end up inside the emitted statement (see the escaping note at the top).
 echo ">> cutover/tp_transactions.sql"
-pg "COPY (SELECT 'INSERT INTO tp_transactions (id,item_id,kind,price,quantity,purchased_at) VALUES ('
-  || id || ',' || item_id || ',' || $(q kind) || ',' || price || ',' || quantity || ','
-  || $(ms purchased_at) || ') ON CONFLICT(id) DO NOTHING;'
-  FROM tp_transactions ORDER BY id) TO STDOUT" > "$ROOT/cutover/tp_transactions.sql"
+pg "SELECT 'INSERT INTO tp_transactions (id,item_id,kind,price,quantity,purchased_at) VALUES (' || id || ',' || item_id || ',' || $(q kind) || ',' || price || ',' || quantity || ',' || $(ms purchased_at) || ') ON CONFLICT(id) DO NOTHING;' FROM tp_transactions ORDER BY id" > "$ROOT/cutover/tp_transactions.sql"
 
 echo ">> cutover/account_balance.sql"
-pg "COPY (SELECT 'INSERT INTO account_balance (recorded_at,coin) VALUES ('
-  || $(ms recorded_at) || ',' || coin || ') ON CONFLICT(recorded_at) DO NOTHING;'
-  FROM account_balance ORDER BY recorded_at) TO STDOUT" > "$ROOT/cutover/account_balance.sql"
+pg "SELECT 'INSERT INTO account_balance (recorded_at,coin) VALUES (' || $(ms recorded_at) || ',' || coin || ') ON CONFLICT(recorded_at) DO NOTHING;' FROM account_balance ORDER BY recorded_at" > "$ROOT/cutover/account_balance.sql"
 
 for table in recipe_defs item_defs; do
   echo ">> .seed/${table}.sql"
-  pg "COPY (SELECT 'INSERT INTO ${table} (id,def,fetched_at) VALUES ('
-    || id || ',' || $(q def) || ',' || $(ms fetched_at) || ')
-    ON CONFLICT(id) DO UPDATE SET def=excluded.def, fetched_at=excluded.fetched_at;'
-    FROM ${table} ORDER BY id) TO STDOUT" > "$ROOT/.seed/${table}.sql"
+  pg "SELECT 'INSERT INTO ${table} (id,def,fetched_at) VALUES (' || id || ',' || $(q def) || ',' || $(ms fetched_at) || ') ON CONFLICT(id) DO UPDATE SET def=excluded.def, fetched_at=excluded.fetched_at;' FROM ${table} ORDER BY id" > "$ROOT/.seed/${table}.sql"
 done
+
+# Guard both escaping traps before anything is handed to wrangler — a bad dump fails the import
+# thousands of rows in, or worse, imports corrupted JSON without failing at all.
+echo
+echo ">> checking the dumps for SQLite-incompatible escaping"
+bad=0
+for f in "$ROOT/cutover/tp_transactions.sql" "$ROOT/cutover/account_balance.sql" \
+         "$ROOT/.seed/recipe_defs.sql" "$ROOT/.seed/item_defs.sql"; do
+  n_e=$(grep -c "E'" "$f" || true)          # quote_literal() escape-string prefix
+  n_nl=$(grep -c '\\n' "$f" || true)        # COPY-escaped newline, i.e. COPY crept back in
+  [ "$n_e" -eq 0 ] && [ "$n_nl" -eq 0 ] || { echo "!! $(basename "$f"): ${n_e} E'-literals, ${n_nl} lines with a literal \\n" >&2; bad=1; }
+done
+[ "$bad" -eq 0 ] || { echo "!! refusing to hand these to wrangler — fix the dump first" >&2; exit 1; }
+echo "   clean"
 
 echo
 echo ">> row counts:"

@@ -452,9 +452,10 @@ all describe the k3s/Postgres shape).
 ## 9. Open items
 
 - ~~`shared-workflows`: cron-trigger registration is unverifiable at deploy time.~~ **Done** —
-  `expect-crons` landed as [#22](https://github.com/dustfeather/shared-workflows/issues/22) and
-  `deploy.yml` uses it (§6). Note `@v4` is a *moving* tag: the feature is on it now but in no
-  semver tag yet, so a caller pinned to `@v4.9.1` would silently not have it.
+  `expect-crons` landed in commit `eee5f3e`, which closed
+  [#22](https://github.com/dustfeather/shared-workflows/issues/22) (closed-completed
+  2026-08-31T06:24Z), and `deploy.yml` uses it (§6). Reachable at `@v4` and `@v4.10.0`, which
+  point at the same commit; a caller pinned to `@v4.9.1` or earlier silently does not have it.
 - Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. They
   exist on `dosar-rapid.ro`, but repo secrets do not cross repos and `dustfeather` is a User
   account, so there is no org tier to inherit from. `gw2roi` currently holds only
@@ -484,16 +485,49 @@ all describe the k3s/Postgres shape).
 - §8 deletions: `k8s/**`, `Dockerfile`, `build.yml`, the three cluster/Grafana scripts.
   `DESIGN.md` §7–§11 rewritten, `CLAUDE.md` rewritten, `README.md` rewritten.
 
-**Not done — every remaining item needs live credentials or a dashboard click:**
+**Verified locally, not just typechecked.** `wrangler dev --test-scheduled` ran the whole
+`scheduled()` handler against the real GW2 API and a local D1, from a **cold** cache:
 
-1. `wrangler d1 create gw2`, then paste the real `database_id` into **both** `wrangler.jsonc`
-   files (they currently carry an all-zeros placeholder, so a deploy would fail).
-2. Add `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets (§9).
-3. Run `scripts/export-pg.sh`, commit `cutover/*.sql`, apply migrations, import all four tables
-   (defs first).
-4. Create the Access application for `gw2.itguys.ro` and attach the two existing policies (§6).
-5. Merge to `main` → first deploy. Verify the board renders and the first cron invocation
-   completes.
-6. By hand afterwards: suspend the k3s CronJob, delete the PVC, the `gw2-postgres-creds` secret
+```
+disciplines=Tailor:500,Weaponsmith:490,Chef:164,Artificer:417 unlocked=454 total_recipes=13183
+recipes: cached=0/13183   qualified=5215 known=3819 learnable=1396
+items:   cached=0/5832    priced_items=5664/5664   owned_free_mats=153 held_mats=458
+known: scored=3637 passing=3 | learnable: scored=864 passing=1
+wrote 3 known + 1 learnable rows, 1642 new tp transactions, balance=1698715c in 145245ms
+timings: account=2270 recipes=106662 tp_prices=979 item_defs=31759 score_known=95
+         score_learnable=24 write_rows=15 known_txns=3 fetch_txns=3156 write_txns=60
+         wallet=207 write_balance=6
+```
+
+Three things that matters for:
+
+- **3 passing known / 1 passing learnable** is exactly what the Postgres board holds (§5), so the
+  cost model, the gates and the ranking survived the port unchanged.
+- **145 s cold**, against the 858 s cold-cache maximum that was the one real risk in §1. The def
+  import in §7 step 3 is still worth doing, but the cold path is no longer near the 900 s wall.
+- `score_known + score_learnable = 119 ms` CPU, matching the 136–194 ms measured pre-migration.
+
+The board was verified the same way: `wrangler dev` over a seeded local D1 returns 200 with all
+four rows, both link forms, `fmtCoin` output including the `(free)` case, and four SVG series.
+
+**Done since:** D1 database `gw2` created — `3a20d0b4-a187-4022-82cb-f091d33b4893`, region EEUR,
+committed to both `wrangler.jsonc` files — and `0000_organic_stryfe.sql` applied to it.
+
+**Not done — every remaining item needs a credential I do not hold, or a dashboard click.
+The order below is load-bearing, for one reason: the missing CF secrets are the only thing
+currently stopping a deploy, so adding them is what makes the board live.**
+
+1. **Create the Access application for `gw2.itguys.ro` first** and attach the two existing
+   policies (§6). Do this *before* step 2, not after. The org has
+   `deny_unmatched_requests: false`, so an unmatched hostname is served **publicly** — and the
+   board renders `account_balance` and the full `tp_transactions` ledger. Deploy first and there
+   is a window where it is world-readable.
+2. Add `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. Confirmed
+   absent: the repo holds only `ARENA_NET_KEY` and `PG_PASSWORD`, no variables, no environments.
+   **Both deploy jobs fail without these** — which is why nothing is live yet.
+3. Run `scripts/export-pg.sh`, commit `cutover/*.sql`, import all four tables (defs first).
+4. Re-run the deploy (push, or `gh workflow run deploy.yml`). Verify the board renders and the
+   first cron invocation completes.
+5. By hand afterwards: suspend the k3s CronJob, delete the PVC, the `gw2-postgres-creds` secret
    and the GHCR image. Nothing in CI touches the cluster any more, so the old CronJob keeps
    running on its last-applied manifest until it is stopped.

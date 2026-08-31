@@ -19,12 +19,11 @@
   "rules": [{ "type": "Text", "globs": ["**/*.txt"], "fallthrough": true }],
 
   // Read-only half. No ARENA_NET_KEY here — the board never talks to the GW2 API.
-  // TODO(cutover §7): replace database_id once `wrangler d1 create gw2` has run.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "gw2",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "3a20d0b4-a187-4022-82cb-f091d33b4893",
       "migrations_dir": "../../drizzle"
     }
   ]

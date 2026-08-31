@@ -525,13 +525,52 @@ Step 5 remains.** The Access app exists, both repo secrets are set, all four tab
 both Workers are deployed green with every gate's evidence recorded below, `gw2.itguys.ro` is live
 and returning 302 to the Access login, and `0 * * * *` is confirmed registered on the account.
 
-**Not yet observed: a completed scheduled invocation.** `craft_roi` is still empty. Nothing is
-wrong — the deploy simply landed after the 09:00 tick. Confirm at the next one, per step 4 check 2.
+**Not yet achieved: a completed scheduled invocation.** `craft_roi` is still empty. The 10:00 and
+11:00 ticks both fired and both **threw** — see "The two pipelines cannot both run" below. The
+k3s CronJob was suspended at 11:27, after its own 11:00 run had already started, so **12:00 is the
+first uncontended tick** and the first honest test.
 
-State right now: both Workers are live, the k3s CronJob is *also* still running on its
-last-applied manifest, and the two are writing to different databases — the Worker to D1, the
-CronJob to Postgres. That double-write is harmless and is the rollback margin; it ends at step 5.
-The old Grafana board keeps working until then.
+#### The two pipelines cannot both run — correcting this plan
+
+An earlier revision of this section called the Worker/CronJob overlap "harmless" and described it
+as the rollback margin. That was wrong, and the migration's first two production ticks are what
+disproved it.
+
+Both pipelines are scheduled `0 * * * *` — the same minute — and both authenticate with the **same
+ArenaNet key**. Each throttles to `MIN_INTERVAL_MS = 210` (~4.76 req/s, `gw2api.ts`) believing it
+owns the whole budget; together that is ~9.5 req/s against ArenaNet's 5 req/s. The second arrival
+is rate-limited for as long as the first is running, and the Worker arrives second.
+
+The 10:00 invocation: one request, `status = scriptThrewException`, 15 subrequests, 15.9 s wall,
+died at 10:00:32.766Z with
+
+```
+run failed: Error: gw2 still failing after retries (429/5xx/authed 400):
+https://api.guildwars2.com/v2/characters?ids=all
+    at async Object.scheduled (worker.js:6740:36)
+```
+
+and `timings at failure: account=15898ms`. `pipeline.run()`'s first phase issues three calls in one
+`Promise.all` and `getJson` retries each five times — 3 × 5 = exactly the 15 subrequests observed,
+so **every one of the three exhausted its retry budget and the run died before any D1 write**.
+That is why every table still holds only Postgres-era rows: this was never a binding, schema or
+secret problem.
+
+The k3s job's 10:00 run occupied 10:00:00 → 10:00:30 with a 14.9 s `recipes` phase; the Worker
+lived 10:00:16.8 → 10:00:32.7, entirely inside it.
+
+The key is not at fault, checked directly: `/v2/tokeninfo` returns 200 with all 11 permissions, and
+`/v2/characters?ids=all` returns 200 in 1.68 s when nothing else is running.
+
+One nuance worth keeping, because it means suspending the CronJob may not be the whole story: the
+third call, `/v2/recipes`, is **unauthenticated**, so a shared *key* budget cannot explain it.
+Unauthenticated GW2 requests are bucketed per source IP, and a Worker egresses from shared
+Cloudflare addresses — so that one plausibly hit an IP-bucket 429 caused by traffic that is not
+ours. If ticks still fail with the CronJob suspended, that is the thing to look at, not the key.
+
+State right now: both Workers are live; the k3s CronJob is **suspended** (`suspend=true`, schedule
+still `0 * * * *`, `lastScheduleTime` 11:00:00Z). Postgres and its PVC are untouched, so rollback
+is still one boolean away — see Rollback.
 
 ### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST) — **DONE 2026-08-31**
 
@@ -842,6 +881,12 @@ is itself a reason not to mistake a rendering board for a working pipeline.
 Nothing in CI touches the cluster any more, so the old CronJob keeps running on its last-applied
 manifest until it is stopped. Suspend before deleting, so a failed cutover can be resumed by
 flipping one boolean:
+
+**The suspend is DONE (2026-08-31 11:27) and was not optional.** It is written here as the first
+step of teardown, but it turned out to be a *precondition for the Worker to function at all* —
+while both were scheduled on `0 * * * *` with the same ArenaNet key, the Worker lost the
+rate-limit race every hour and threw (see step 4). Everything below the suspend is still pending
+and still gated on seeing the Worker write D1 successfully.
 
 ```sh
 kubectl -n trading patch cronjob gw2-crafting-roi -p '{"spec":{"suspend":true}}'

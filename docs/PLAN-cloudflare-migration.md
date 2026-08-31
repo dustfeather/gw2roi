@@ -401,6 +401,10 @@ Under `versions upload`, crons are applied only by a separate, still-`[experimen
 
 ## 7. Cutover
 
+> Superseded as a checklist by **§11**, which is the executable version with the current state
+> folded in (step 2 is already done — the database exists and is migrated). This section is the
+> reasoning; §11 is what to run.
+
 Big-bang. k3s is left running and **stopped by hand** afterwards.
 
 1. **Dump all four tables** from Postgres — `bash scripts/export-pg.sh`, which port-forwards to
@@ -456,15 +460,10 @@ all describe the k3s/Postgres shape).
   [#22](https://github.com/dustfeather/shared-workflows/issues/22) (closed-completed
   2026-08-31T06:24Z), and `deploy.yml` uses it (§6). Reachable at `@v4` and `@v4.10.0`, which
   point at the same commit; a caller pinned to `@v4.9.1` or earlier silently does not have it.
-- Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. They
-  exist on `dosar-rapid.ro`, but repo secrets do not cross repos and `dustfeather` is a User
-  account, so there is no org tier to inherit from. `gw2roi` currently holds only
-  `ARENA_NET_KEY` and `PG_PASSWORD`, with zero environments and zero variables.
-- Re-measure peak memory after the next large game expansion — it tracks `item_defs` row count
-  against a fixed 128 MB ceiling.
-- Optional follow-up: the throttle serializes to **1 in-flight request**, using ~4.8 of the
-  5 req/s GW2 budget. Raising concurrency toward 5 (still under the 6-connection cap) would cut
-  the dominant cost of every run. Out of scope here; noted because the measurement made it visible.
+- The rest of this list became actionable work and moved to **§11, the runbook** — repo secrets,
+  the Access application, the data import, the first deploy, the k3s teardown, and the two
+  non-blocking follow-ups (memory re-measure, request concurrency). §11 is the single list to
+  work from; this section is kept for the reasoning behind each item, not as a checklist.
 
 ---
 
@@ -513,21 +512,178 @@ four rows, both link forms, `fmtCoin` output including the `(free)` case, and fo
 **Done since:** D1 database `gw2` created — `3a20d0b4-a187-4022-82cb-f091d33b4893`, region EEUR,
 committed to both `wrangler.jsonc` files — and `0000_organic_stryfe.sql` applied to it.
 
-**Not done — every remaining item needs a credential I do not hold, or a dashboard click.
-The order below is load-bearing, for one reason: the missing CF secrets are the only thing
-currently stopping a deploy, so adding them is what makes the board live.**
+---
 
-1. **Create the Access application for `gw2.itguys.ro` first** and attach the two existing
-   policies (§6). Do this *before* step 2, not after. The org has
-   `deny_unmatched_requests: false`, so an unmatched hostname is served **publicly** — and the
-   board renders `account_balance` and the full `tp_transactions` ledger. Deploy first and there
-   is a window where it is world-readable.
-2. Add `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` to the `gw2roi` repo secrets. Confirmed
-   absent: the repo holds only `ARENA_NET_KEY` and `PG_PASSWORD`, no variables, no environments.
-   **Both deploy jobs fail without these** — which is why nothing is live yet.
-3. Run `scripts/export-pg.sh`, commit `cutover/*.sql`, import all four tables (defs first).
-4. Re-run the deploy (push, or `gh workflow run deploy.yml`). Verify the board renders and the
-   first cron invocation completes.
-5. By hand afterwards: suspend the k3s CronJob, delete the PVC, the `gw2-postgres-creds` secret
-   and the GHCR image. Nothing in CI touches the cluster any more, so the old CronJob keeps
-   running on its last-applied manifest until it is stopped.
+## 11. Remaining work — runbook
+
+Everything below needs a credential or a console click that the port itself did not. Nothing is
+live yet, and one fact sets the order: **the two missing Cloudflare repo secrets are the only
+thing failing the deploy.** Adding them is the switch that makes the board public. So the Access
+application goes first.
+
+State right now: `main` is on the Workers code, the k3s CronJob is still running on its
+last-applied manifest, and both are writing nothing to each other. The old board keeps working
+until step 5.
+
+### Step 1 — Access application for `gw2.itguys.ro` (do this FIRST)
+
+**Why first.** The org has `deny_unmatched_requests: false` with an empty exempted-zones list, so
+a hostname no application matches is **served publicly, not blocked**. The board renders
+`account_balance` and the entire `tp_transactions` ledger. The old exposure model was network
+topology — `grafana.itguys.ro` is an unproxied WARP-mesh address, unreachable from the internet
+regardless of Access. On a Worker there is no such backstop: Access is the only control. Deploy
+before this exists and the ledger is world-readable for that window.
+
+Create one **self-hosted** application, its own app rather than a literal on `ITGuys Admin`
+(attaching `Service Token Access` to that app would hand the CI token `itguys.ro/admin`,
+`/api/admin` and `invest.itguys.ro` as well). Config, per §6:
+
+| field | value |
+|---|---|
+| `type` | `self_hosted` |
+| `destinations` | `gw2.itguys.ro` |
+| `session_duration` | `730h` |
+| `allowed_idps` | `[]` — all IdPs, so one-time PIN is offered |
+| `auto_redirect_to_identity` | `false` (required when `allowed_idps` is empty) |
+| policies | `Admin Access` (allow) and `Service Token Access` (non_identity), both **existing and reused by id** |
+
+**Trap:** the `google-apps` IdP is pinned to `apps_domain: "itguys.ro"`, so `dustfeather@gmail.com`
+cannot authenticate through it. Any app setting `allowed_idps: [google-apps]` is Workspace-only.
+Leaving it `[]` is what `dosar-rapid` and `Automation API` already do.
+
+An extra app object costs nothing: **Access bills per seat, not per app.** Headroom is 500 apps
+(5 in use), 500 reusable policies (3), 50 service tokens (3).
+
+**Done when** `curl -sI https://gw2.itguys.ro/` returns a 302 to the Access login page rather than
+the board — check this *before* step 2, while the hostname still 404s at the edge, and again
+right after the first deploy.
+
+### Step 2 — Cloudflare repo secrets
+
+Confirmed absent on `dustfeather/gw2roi`: only `ARENA_NET_KEY` (2026-07-23) and `PG_PASSWORD`
+(2026-07-23) exist, with zero variables and zero environments. They exist on `dosar-rapid.ro`, but
+repo secrets do not cross repos and `dustfeather` is a User account, so there is no org tier to
+inherit from.
+
+```sh
+gh secret set CLOUDFLARE_API_TOKEN   --repo dustfeather/gw2roi   # Workers Scripts Edit + D1 Edit
+gh secret set CLOUDFLARE_ACCOUNT_ID  --repo dustfeather/gw2roi   # 328c2ac1408b3260bb83a7735a7fafe8
+```
+
+The token needs Workers Scripts **Edit** and D1 **Edit**. `expect-crons` additionally reads
+`/workers/scripts/{name}/schedules`, which takes Workers Scripts **Read** — already implied by
+Edit, so no extra grant.
+
+**Done when** `gh secret list --repo dustfeather/gw2roi` shows four names.
+
+### Step 3 — Move the data
+
+```sh
+bash scripts/export-pg.sh                     # port-forwards, dumps all four tables
+git add cutover/ && git commit -m "chore: bank the irreplaceable ledger dumps"
+
+npx wrangler d1 execute gw2 --remote --file .seed/item_defs.sql        # defs FIRST
+npx wrangler d1 execute gw2 --remote --file .seed/recipe_defs.sql
+npx wrangler d1 execute gw2 --remote --file cutover/tp_transactions.sql
+npx wrangler d1 execute gw2 --remote --file cutover/account_balance.sql
+```
+
+Defs first because that is what keeps the first Worker run off the cold path. The local cold run
+measured 145 s (§10), so this is no longer the risk §1 thought it was — but it is still 27k rows
+of API traffic avoided on the very first invocation.
+
+`tp_transactions` and `account_balance` are **committed** because they are irreplaceable:
+`/v2/account/wallet` returns only the current balance, so `account_balance` is the only balance
+history that will ever exist, and `tp_transactions` outlives the API's ~90-day window. The 25 MB
+def dumps stay in the gitignored `.seed/` — they can always be refetched.
+
+**Done when** the counts match the source:
+
+```sh
+npx wrangler d1 execute gw2 --remote --command \
+  "SELECT 'recipe_defs' t, count(*) n FROM recipe_defs
+   UNION ALL SELECT 'item_defs', count(*) FROM item_defs
+   UNION ALL SELECT 'tp_transactions', count(*) FROM tp_transactions
+   UNION ALL SELECT 'account_balance', count(*) FROM account_balance;"
+```
+
+Expect ≈ 13,183 / 13,961 / 1,886 / 657, allowing for rows the old job added between the dump and
+the check.
+
+### Step 4 — First deploy
+
+```sh
+gh workflow run deploy.yml --repo dustfeather/gw2roi     # or just push
+```
+
+What each gate actually proves, and what it does not:
+
+| gate | proves |
+|---|---|
+| typecheck | the workspace compiles |
+| bundle gzip (pre-deploy, `--dry-run`) | ≤ 600 KiB cron / 900 KiB web. Measured 42.7 / 64.6 KiB, so this is a creep alarm, not a live constraint |
+| `wrangler secret list` | `ARENA_NET_KEY` actually landed on `gw2-roi-cron` |
+| startup time (post-deploy) | the script parsed and initialised under 400 ms — **the version is already live when this runs** |
+| `expect-crons` | `0 * * * *` is registered on the account, not merely present in a config file |
+
+Neither Worker sets `verify-url`: the cron Worker has no HTTP surface, and the board is behind
+Access so an unauthenticated curl would 302 and fail every deploy. **A green run therefore does
+not prove the board renders or that the job works.** Check by hand:
+
+1. Open `https://gw2.itguys.ro/` in a browser, authenticate through Access, confirm the stat row,
+   the graph and both tables render — the graph is the part that reads `tp_transactions` and
+   `account_balance`, so it is also the import's end-to-end check.
+2. Wait for the first `0 * * * *` tick, then `npx wrangler tail gw2-roi-cron` or:
+
+   ```sh
+   npx wrangler d1 execute gw2 --remote --command \
+     "SELECT datetime(max(updated_at)/1000,'unixepoch') FROM craft_roi;"
+   ```
+
+   A timestamp inside the last hour means a real scheduled invocation completed. Expect 3-ish
+   rows — a thin board is a velocity-gate artifact, not a failure.
+
+### Step 5 — Tear down k3s (by hand, after step 4 is confirmed)
+
+Nothing in CI touches the cluster any more, so the old CronJob keeps running on its last-applied
+manifest until it is stopped. Suspend before deleting, so a failed cutover can be resumed by
+flipping one boolean:
+
+```sh
+kubectl -n trading patch cronjob gw2-crafting-roi -p '{"spec":{"suspend":true}}'
+# ...confirm the Worker has been writing for a few hours, THEN:
+kubectl -n trading delete cronjob gw2-crafting-roi
+kubectl -n trading delete statefulset gw2-postgres
+kubectl -n trading delete svc gw2-postgres
+kubectl -n trading delete pvc data-gw2-postgres-0        # irreversible — after step 3 is verified
+kubectl -n trading delete secret gw2-api-key gw2-postgres-creds
+kubectl -n trading delete configmap gw2-roi-config
+kubectl -n trading delete role,rolebinding gw2-ci-deployer
+```
+
+Then:
+
+- Delete the Grafana dashboard `gw2-craft-roi` and the datasource `gw2-postgres` — both otherwise
+  linger pointing at a database that no longer exists.
+- Delete the GHCR package `ghcr.io/dustfeather/gw2-crafting-roi-bot`.
+- `gh secret delete PG_PASSWORD --repo dustfeather/gw2roi` — nothing reads it any more.
+- Keep the `arc-df-gw2roi` runner scale set: it still runs the deploy.
+
+### Rollback
+
+Until step 5's deletes, rollback is cheap: unsuspend the CronJob and the old pipeline resumes
+against a Postgres that never stopped holding its data. The manifests are one revert away
+(`git revert c5bfbea` restores `k8s/**`, `Dockerfile` and `build.yml`), though re-applying them
+needs an admin kubeconfig — the deployer Role never had the verbs for `postgres.yaml` or
+`rbac.yaml`.
+
+After the PVC is deleted there is no rollback, only a re-import from `cutover/*.sql` plus a
+`seed-cache.sh` run. That is the reason the PVC delete is last and gated on step 3 being
+verified.
+
+### Still open, not blocking
+
+- Re-measure peak memory after the next large game expansion — it tracks `item_defs` row count
+  against a fixed 128 MB isolate ceiling (90.8 MiB today).
+- The throttle serializes to 1 in-flight request. Raising concurrency toward 5 would cut
+  `recipes=106662ms`, which the cold run confirms is the dominant cost of a run.

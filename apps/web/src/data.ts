@@ -144,5 +144,48 @@ function buildSeries(txns: TxnPoint[], balances: BalancePoint[]): SeriesPoint[] 
     points.push({ t: Date.now(), bought: last.bought, sold: last.sold, net: last.net, balance: null });
   }
 
-  return points;
+  return clipToWindow(points);
+}
+
+// The graph shows the last WINDOW_DAYS only. The ledger accumulates forever and the interesting
+// shape is recent, so the whole history compresses into a flat line at the right-hand edge.
+export const WINDOW_DAYS = 30;
+
+// Narrow the series to the window WITHOUT rebasing it. The cumulative lines keep their all-time
+// values and this is a zoom, not a recomputation — restarting them at zero would silently change
+// `net` from "cumulative ever" into "flow over 30 days", and would be simply wrong for `balance`,
+// which is an absolute gold figure.
+//
+// The boundary point is what makes it a clean cut: every series is sparse and carries its value
+// forward, so dropping the earlier points would leave each line starting wherever its first
+// in-window sample happens to fall. Instead the last known value of each series at or before the
+// cutoff is carried onto the cutoff itself, so every line enters the window at the correct height.
+function clipToWindow(points: SeriesPoint[]): SeriesPoint[] {
+  const cutoff = Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+  let carriedCum: { bought: number; sold: number; net: number } | null = null;
+  let carriedBalance: number | null = null;
+  const inWindow: SeriesPoint[] = [];
+
+  for (const p of points) {
+    if (p.t >= cutoff) {
+      inWindow.push(p);
+      continue;
+    }
+    // Before the cutoff: remember it rather than emit it.
+    if (Number.isFinite(p.net)) carriedCum = { bought: p.bought, sold: p.sold, net: p.net };
+    if (p.balance !== null) carriedBalance = p.balance;
+  }
+
+  if (carriedCum === null && carriedBalance === null) return inWindow; // nothing predates the window
+  return [
+    {
+      t: cutoff,
+      bought: carriedCum?.bought ?? NaN,
+      sold: carriedCum?.sold ?? NaN,
+      net: carriedCum?.net ?? NaN,
+      balance: carriedBalance,
+    },
+    ...inWindow,
+  ];
 }

@@ -4,7 +4,7 @@
 // memory to render the tables anyway, and an inline <svg> keeps the strict CSP (`script-src
 // 'none'`) that a read-only board should have. It is also the only form that survives the
 // board being behind Access without a second authenticated request.
-import type { SeriesPoint } from "../data.ts";
+import { WINDOW_DAYS, type SeriesPoint } from "../data.ts";
 
 const W = 1000;
 const H = 280;
@@ -68,8 +68,12 @@ export function TpChart({ points }: { points: SeriesPoint[] }) {
   const t1 = points[points.length - 1]!.t;
   const span = Math.max(1, t1 - t0);
 
-  let lo = 0;
-  let hi = 0;
+  // Both bounds come from the data. They used to be seeded at 0, which pinned the axis to the
+  // origin — fine when the graph spanned the whole ledger and started there anyway, but with a
+  // 30-day window over all-time cumulative totals it would squash every line into a flat band at
+  // the top of the plot. Zero is included below only when the data actually crosses it.
+  let lo = Infinity;
+  let hi = -Infinity;
   for (const p of points) {
     for (const s of SERIES) {
       const v = value(p, s.key);
@@ -77,6 +81,9 @@ export function TpChart({ points }: { points: SeriesPoint[] }) {
       if (v < lo) lo = v;
       if (v > hi) hi = v;
     }
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    return <p class="text-sm text-stone-400">No trading-post history yet.</p>;
   }
   if (hi === lo) hi = lo + 1;
 
@@ -92,7 +99,7 @@ export function TpChart({ points }: { points: SeriesPoint[] }) {
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="Cumulative trading post bought, sold, net and account balance, in gold"
+        aria-label={`Cumulative trading post bought, sold, net and account balance, in gold, over the last ${WINDOW_DAYS} days`}
         class="w-full h-auto"
       >
         {ticks.map((v) => (
@@ -141,7 +148,7 @@ export function TpChart({ points }: { points: SeriesPoint[] }) {
             {s.label}
           </span>
         ))}
-        <span class="ml-auto">gold, whole history</span>
+        <span class="ml-auto">gold, cumulative — last {WINDOW_DAYS} days</span>
       </figcaption>
     </figure>
   );

@@ -1050,12 +1050,62 @@ egress for Worker traffic landed [2026-06-05](https://developers.cloudflare.com/
 Sources predating that — including Cloudflare community answers — still say a Worker's outbound
 `fetch()` cannot be routed through Gateway at all. That was true, and is not any more.
 
-### Status and consequences
+### Resolution — 2026-09-01T03:01Z, first successful scheduled run
 
-- The binding is deployed. **Its effect was still unverified when this was written**: the honest
-  signal remains a `craft_roi` row with an `updated_at` inside the last hour, nothing less.
-- §11 step 5's teardown stays gated. "Confirm the Worker has been writing for a few hours" has
-  never been satisfied, so the Postgres StatefulSet and its PVC stay exactly where they are.
+Version 6 (`0aebb27d-5565-4a41-b18b-16aa7fcbf430`) deployed 02:51:01Z. The binding is really
+there, and on the version rather than only in the script settings blob: Cloudflare reports
+`EGRESS` as type **`vpc_network`** with `network_id: "cf1:network"`, alongside `DB`,
+`ARENA_NET_KEY` and the eight vars. (`remote` does not round-trip into the deployed binding —
+expected, it only governs local-dev remote bindings.)
+
+The 02:00Z tick still threw, but it predates the deploy and is not evidence either way. The
+03:00Z tick is the first on version 6, and it **succeeded**:
+
+```
+03:01:06  recipes: cached=13183/13183 fetched_new=0 refreshed=600
+03:01:10  known: scored=3637 passing=3 | learnable: scored=864 passing=2
+03:01:12  wrote 3 known + 2 learnable rows, 0 new tp transactions (1886 already banked),
+          balance=1698715c in 13591ms
+03:01:12  timings: account=1845ms recipes=6607ms tp_prices=955ms item_defs=2754ms ...
+```
+
+Zero 429s, and `account=1845ms` against `10596ms` on the last failing run. That 8.7 s delta *is*
+the retry backoff no longer being spent — the cleanest possible confirmation that the calls now
+leave from a different source IP, since nothing else in the phase changed. D1 moved with it:
+`craft_roi` max(`updated_at`) `2026-08-31 11:00:27Z` → `2026-09-01 03:01:10Z`, and
+`account_balance` gained its first Worker-written row at 03:01:11Z.
+
+3 known + 2 learnable is the expected board size — a velocity-gate artifact matching the
+pre-outage Postgres board, not a regression.
+
+### What this bought, and the new failure mode it introduced
+
+**The Worker's egress is now governed by Zero Trust policy.** That is the point, and it is also a
+new dependency the previous design did not have:
+
+- A future Gateway DNS/HTTP/Network rule can break the hourly run. The account currently has
+  `tls_decrypt.enabled: true` and `antivirus.fail_closed: true`; if either ever trips on
+  `api.guildwars2.com`, `getJson` fails with a TLS error or a 5xx, **not** a 429. Do not diagnose
+  the next outage by pattern-matching this one.
+- `cf1:network` requires at least one active Tunnel or Mesh connector on the account. Today that
+  is `itguys-cluster` (cfd_tunnel, healthy) and `home-lab-mesh` (warp_connector, healthy). Worth
+  confirming whether the binding merely requires one to exist or actually routes through it,
+  because the second reading would reintroduce a dependency on exactly the hardware this
+  migration removed.
+- **The fallback is silent.** `packages/core/gw2api.ts` reads
+  `const doFetch: Fetcher["fetch"] = egress ? egress.fetch.bind(egress) : fetch;` — if `EGRESS`
+  ever stops being bound, the client drops to global fetch with no startup error and the 429s
+  simply return. That is deliberate (an unbound deploy should not be worse than no deploy) but it
+  means a missing binding presents as the old symptom, not as a new one.
+- `datawars.ts` still uses global `fetch`, on purpose: datawars2 has no per-IP limit worth
+  dodging, so market data stays off the Gateway path and off its blast radius. `gw2-roi-web` has
+  no VPC binding and never calls the GW2 API.
+
+### Consequences for step 5
+
+§11 step 5's teardown is no longer blocked on "does the Worker work" — it does. It is now blocked
+only on "has it been writing for a few hours", which as of this entry is one run. The Postgres
+StatefulSet and its PVC stay where they are until that is a day or so of green ticks.
 - Unresolved side-observation: five scheduled hours (15, 16, 19, 22 on 08-31; 00 on 09-01) have no
   invocation record at all — neither `ok` nor exception. They cannot be silent successes, since
   `craft_roi` did not move. Most likely sampling in `workersInvocationsAdaptive` rather than

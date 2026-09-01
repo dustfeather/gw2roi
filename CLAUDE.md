@@ -35,7 +35,8 @@ already runs the workspace typecheck on staged `.ts`/`.tsx` and `jq`-validates s
 (`tsconfig*.json` and `wrangler.jsonc` are skipped — they are JSONC and jq rejects comments).
 Bypass with `GW2_SKIP_TSC=1` / `GW2_SKIP_JSON_CHECK=1`.
 
-Cloudflare operations (needs `CLOUDFLARE_API_TOKEN` in `.env`):
+Cloudflare operations (need `CLOUDFLARE_API_TOKEN` exported; the token lives in `~/.cf-token`,
+not in `.env` — `.env` holds only `ARENA_NET_KEY` and leftovers from the Postgres era):
 
 ```sh
 npx wrangler d1 migrations apply gw2 --remote          # CI does this pre-deploy; rarely manual

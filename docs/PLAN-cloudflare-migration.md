@@ -538,7 +538,9 @@ and returning 302 to the Access login, and `0 * * * *` is confirmed registered o
 **Not yet achieved: a completed scheduled invocation.** `craft_roi` is still empty. The 10:00 and
 11:00 ticks both fired and both **threw** — see "The two pipelines cannot both run" below. The
 k3s CronJob was suspended at 11:27, after its own 11:00 run had already started, so **12:00 is the
-first uncontended tick** and the first honest test.
+first uncontended tick** and the first honest test. That test failed, and so did every tick after
+it, for sixteen hours — the contention theory was right about 10:00 and 11:00 and wrong about the
+cause. See **§12**.
 
 #### The two pipelines cannot both run — correcting this plan
 
@@ -949,3 +951,113 @@ verified.
   against a fixed 128 MB isolate ceiling (90.8 MiB today).
 - The throttle serializes to 1 in-flight request. Raising concurrency toward 5 would cut
   `recipes=106662ms`, which the cold run confirms is the dominant cost of a run.
+
+
+## 12. The 429 incident — sixteen hours of failed ticks (2026-08-31 → 09-01)
+
+Step 4 ended on an unsatisfied check: no scheduled invocation had completed. It stayed
+unsatisfied. From 2026-08-31T10:00Z to 2026-09-01T02:00Z, **12 of 12 recorded invocations threw
+and none succeeded**, every one dying in the first (account) phase about 10–16 s in:
+
+```
+run failed: Error: gw2 still failing after retries
+[429(retry-after=- limit=600 remaining=-) x5]:
+https://api.guildwars2.com/v2/characters?ids=all
+    at getJson → Promise.all (index 0) → phase → run → scheduled
+timings at failure: account=10430..15788ms
+```
+
+`/v2/recipes` failed identically in the same runs. `craft_roi` never moved off the three rows
+imported in step 3, `updated_at` frozen at `2026-08-31 11:00:27Z`, so the board served a
+sixteen-hour-old snapshot while rendering perfectly — the exact trap step 4 warned about.
+
+### What it was not
+
+Each of these was checked, not assumed, because the failure mode looks identical to all of them:
+
+| suspect | ruled out by |
+|---|---|
+| contention with the k3s CronJob | the CronJob was **deleted** at 11:33; failures continued unbroken for 15 h after |
+| the secret never reached the Worker | `GET /workers/scripts/gw2-roi-cron/settings` shows `ARENA_NET_KEY` as **`secret_text`**; deploy run `33391085877` logged `Staging 1 secret(s)` then `All staged secrets present on the Worker`, the latter from an independent post-deploy `wrangler secret list` |
+| the secret arrived empty | `buildConfig()` runs before any HTTP call and `str()` throws `missing required env: ARENA_NET_KEY` on `""` as well as `undefined`. The logs show the account phase *running*, so config built |
+| the key is invalid or under-scoped | `/v2/tokeninfo` → 200, Full Access, 11 permissions incl. `characters`, `tradingpost`, `wallet`. And a bad key is 401/403, which `getJson` does **not** retry — it would throw once, immediately, with the body |
+| the port broke something | identical code, `wrangler dev --test-scheduled`, full cold run in 145 s (§10) — from a desktop IP |
+
+### The control experiment
+
+Same key, same URL, minutes apart:
+
+| from | `/v2/characters?ids=all` |
+|---|---|
+| desktop, `86.120.74.x` | **200** |
+| `gw2-roi-cron` | **429** ×5 |
+
+### The mechanism
+
+**ArenaNet meters by source IP and has no per-key bucket at all** — a 300-token bucket refilling
+5/s, and the wiki states it "applies to all endpoints, whether the endpoint is authenticated or
+not" ([API:Best practices](https://wiki.guildwars2.com/wiki/API:Best_practices)). A valid key buys
+*access* to account endpoints, never *budget*.
+
+Two observations pin it to the address rather than to anything of ours:
+
+- `/v2/recipes` is sent with **no `Authorization` header** (`getJson(..., false)`) and 429s in the
+  same run. No key-scoped explanation survives that.
+- **The first attempt 429s.** The backoff sums to 1+2+3+4 = 10 s and the ~15 attempts cost ~3 s of
+  throttle; that accounts for the whole 10–16 s wall time, so no attempt ever waited on a
+  response. A client cannot self-inflict a rate limit on its first request — the budget was spent
+  before the run started, by other tenants sharing Cloudflare's egress pool.
+
+### The header trap
+
+`x-rate-limit-limit: 600` is **not** evidence of a drained bucket. ArenaNet returns it on 200s
+too, and it never sends `x-rate-limit-remaining`, `-reset` or `retry-after` — on success or on
+429. So `429(retry-after=- limit=600 remaining=-)` carries no bucket state whatsoever, the five
+linear retries are blind, and spanning only ~10 s they all land inside one exhausted window. Note
+also that the header advertises 600 while the wiki documents a 300-token bucket; neither number
+is a reading of the live budget.
+
+### The fix, and what it can and cannot buy
+
+`c498147` adds a Workers VPC Network binding, so GW2 requests egress through Cloudflare Gateway
+instead of the shared Workers pool:
+
+```jsonc
+"vpc_networks": [{ "binding": "EGRESS", "network_id": "cf1:network", "remote": true }]
+```
+
+`createGw2Client(cfg, egress?: Fetcher)` takes it and the single `fetch` in `getJson` becomes
+`doFetch`. Typed `Fetcher["fetch"]`, not `typeof fetch` — the global carries a `preconnect`
+property the binding lacks and the wider type rejects the assignment. The parameter is optional so
+`scripts/seed-cache.ts`, which runs on Bun from a sole-tenant IP with no bindings, keeps global
+`fetch`, and so an unbound deploy degrades to the current behaviour instead of throwing at startup.
+
+This lands the **default Gateway egress range** — still shared, but shared across Zero Trust
+accounts rather than with the Workers pool. Whether it is any cleaner is an empirical question the
+next tick answers; it is not a guaranteed fix.
+
+Pinning an IP outright is not available here. A [dedicated egress
+IP](https://developers.cloudflare.com/cloudflare-one/traffic-policies/egress-policies/dedicated-egress-ips/)
+is "only available as an add-on to Zero Trust Enterprise plans", provisioned in pairs across two
+cities, with no published price and a contact-your-account-team wall. BYOIP is Enterprise-gated
+too and additionally requires owning the prefix at a regional registry. The default Gateway path,
+by contrast, works on the Zero Trust free tier — the Enterprise gate is on *choosing* the egress
+IP, not on egressing. If a dedicated IP is ever bought, this same binding is what it attaches to,
+so the change is not wasted either way.
+
+Both halves of this are young: Workers VPC Networks went public beta 2026-04-14, and Gateway
+egress for Worker traffic landed [2026-06-05](https://developers.cloudflare.com/changelog/post/2026-06-05-gateway-egress/).
+Sources predating that — including Cloudflare community answers — still say a Worker's outbound
+`fetch()` cannot be routed through Gateway at all. That was true, and is not any more.
+
+### Status and consequences
+
+- The binding is deployed. **Its effect was still unverified when this was written**: the honest
+  signal remains a `craft_roi` row with an `updated_at` inside the last hour, nothing less.
+- §11 step 5's teardown stays gated. "Confirm the Worker has been writing for a few hours" has
+  never been satisfied, so the Postgres StatefulSet and its PVC stay exactly where they are.
+- Unresolved side-observation: five scheduled hours (15, 16, 19, 22 on 08-31; 00 on 09-01) have no
+  invocation record at all — neither `ok` nor exception. They cannot be silent successes, since
+  `craft_roi` did not move. Most likely sampling in `workersInvocationsAdaptive` rather than
+  skipped triggers, as the schedule has been unmodified since 12:20:38Z. Re-check once runs are
+  green before touching the trigger.

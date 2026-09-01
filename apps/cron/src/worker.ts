@@ -23,6 +23,11 @@ export interface Env {
   // Secret, shipped by CI via WORKER_SECRETS. Everything else is a `vars` entry read by
   // buildConfig() — see §10 and apps/cron/wrangler.jsonc.
   ARENA_NET_KEY: string;
+  // Workers VPC Network binding on `cf1:network`: GW2 requests egress through Cloudflare
+  // Gateway rather than the Workers shared pool, because ArenaNet rate-limits per source IP.
+  // Optional on purpose — an unbound deploy falls back to global fetch and merely fails the
+  // way it already does, instead of throwing at startup.
+  EGRESS?: Fetcher;
 }
 
 export default {
@@ -36,7 +41,7 @@ export default {
     // milliseconds instead of after a full pipeline's worth of API calls.
     const cfg = buildConfig(env as unknown as Record<string, unknown>);
     const db = createDb(env.DB);
-    const api = createGw2Client(cfg);
+    const api = createGw2Client(cfg, env.EGRESS);
 
     try {
       const { known, learnable } = await run(cfg, db, api);

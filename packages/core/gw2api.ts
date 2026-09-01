@@ -90,7 +90,18 @@ export interface Gw2Client {
   fetchTpTransactions(known?: Set<number>): Promise<TpTxn[]>;
 }
 
-export function createGw2Client(cfg: Config): Gw2Client {
+// `egress` is the Workers VPC Network binding (`cf1:network`), which sends the request out
+// through Cloudflare Gateway instead of the Workers shared egress pool. It exists because
+// ArenaNet meters by SOURCE IP, not by key (300-token bucket, 5/s refill, applied to
+// unauthenticated endpoints too), so the Worker inherited a budget already spent by whoever
+// else shares that egress address: every tick from 2026-08-31 11:00Z on died with five 429s
+// in the account phase, while the identical call with the identical key returned 200 from a
+// home IP in the same minute. Optional so the Bun seeder — which runs on a real, sole-tenant
+// IP and has no bindings — keeps using global fetch unchanged.
+export function createGw2Client(cfg: Config, egress?: Fetcher): Gw2Client {
+  // Typed as the binding's own `fetch`, not `typeof fetch`: the global carries a `preconnect`
+  // property the binding does not have, and the wider type would reject the assignment.
+  const doFetch: Fetcher["fetch"] = egress ? egress.fetch.bind(egress) : fetch;
   let lastReq = 0;
   async function throttle(): Promise<void> {
     const now = Date.now();
@@ -108,7 +119,7 @@ export function createGw2Client(cfg: Config): Gw2Client {
     const attempts: string[] = [];
     for (let attempt = 0; attempt < 5; attempt++) {
       await throttle();
-      const res = await fetch(url, {
+      const res = await doFetch(url, {
         headers: auth ? { Authorization: `Bearer ${cfg.arenaNetKey}` } : {},
       });
       // Retry rate-limits (429), transient server errors (5xx), and the 400s ArenaNet

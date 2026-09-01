@@ -43,6 +43,20 @@
     "RECIPE_REFRESH_PER_RUN": "600"
   },
 
+  // Public-internet egress for the GW2 calls, routed through Cloudflare Gateway instead of
+  // the Workers shared egress pool. ArenaNet's rate limit is per SOURCE IP and ignores the API
+  // key entirely, so on shared Workers egress the hourly run arrived at an already-drained
+  // bucket and threw five 429s in its first phase, every hour, from 2026-08-31 11:00Z. This
+  // moves the run onto the Zero Trust egress range; if that pool is no cleaner, the same
+  // binding is what a dedicated egress IP would later attach to.
+  "vpc_networks": [
+    {
+      "binding": "EGRESS",
+      "network_id": "cf1:network",
+      "remote": true
+    }
+  ],
+
   // The id is not a secret — it is inert without CLOUDFLARE_API_TOKEN, the same category as a
   // bucket name — so it is committed rather than templated, as dosar-rapid does it.
   "d1_databases": [

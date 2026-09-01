@@ -13,7 +13,8 @@ name: deploy
 #   CLOUDFLARE_ACCOUNT_ID
 #
 # NOT done here (one-off, by hand): creating the D1 database, importing the cutover dumps,
-# and creating the Access application + custom domain. See docs/PLAN-cloudflare-migration.md §7.
+# and creating the Access application + custom domain. All three are done; the runbook for them
+# is in the deleted migration record, `git show b90f556:docs/PLAN-cloudflare-migration.md` §7.
 
 on:
   push:

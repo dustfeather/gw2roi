@@ -2,8 +2,7 @@
 
 Ranks the **top-N craftable items by profit per craft** and renders them on a board at
 `gw2.itguys.ro`. Runs hourly as a Cloudflare Cron Trigger, over D1.
-Design: [`DESIGN.md`](./DESIGN.md). Migration record:
-[`docs/PLAN-cloudflare-migration.md`](./docs/PLAN-cloudflare-migration.md).
+Design: [`DESIGN.md`](./DESIGN.md).
 
 ```
 apps/cron/      gw2-roi-cron   scheduled() only, no route — computes and writes

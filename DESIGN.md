@@ -89,8 +89,9 @@ Also displayed per row (context, not ranking):
 
 ## 7. Deployment
 
-Migrated off k3s to Cloudflare on 2026-08-31 — see `docs/PLAN-cloudflare-migration.md` for the
-measurements that reversed the earlier "keep the job in k3s" call. The k3s footprint is zero.
+Migrated off k3s to Cloudflare on 2026-08-31. The measurements that reversed the earlier "keep
+the job in k3s" call are in the migration record, deleted once the cutover completed and readable
+at `git show b90f556:docs/PLAN-cloudflare-migration.md`. The k3s footprint is zero.
 
 - **Two Workers, not one.**
   - `gw2-roi-cron` — `scheduled()` only, **no route and no custom domain**, so it has no public
@@ -236,7 +237,8 @@ cost model and the gates is still the reasoning in force — only the deployment
 
 Anything below this line describing a CronJob, a Postgres StatefulSet, GHCR or Grafana is
 **historical**. The measurements that reversed the original "keep the job in k3s, reach D1 over
-REST" decision are in `docs/PLAN-cloudflare-migration.md` §1.
+REST" decision are in §1 of the deleted migration record —
+`git show b90f556:docs/PLAN-cloudflare-migration.md`.
 
 ---
 

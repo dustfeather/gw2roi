@@ -17,8 +17,9 @@ database:
 `DESIGN.md` is the spec and is actively referenced from code comments by section number
 (§4 cost model, §5 ROI, §6 gates, §10 config surface, §11 pipeline). When changing pipeline
 semantics, keep DESIGN.md and those `(§n)` comments in sync.
-`docs/PLAN-cloudflare-migration.md` is the migration record — read it before questioning a shape
-decision, it has the measurements.
+The migration record that justified this shape was deleted once the cutover finished. It is not
+lost — `git show b90f556:docs/PLAN-cloudflare-migration.md` has the measurements behind every
+decision below, including the 429 incident that took the first sixteen hours of Worker ticks.
 
 ## Commands
 

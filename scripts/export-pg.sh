@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Cutover step 1 (docs/PLAN-cloudflare-migration.md §7): dump the four live Postgres tables as
-# SQLite-compatible INSERT statements, ready for `wrangler d1 execute --file`.
+# Cutover step 1: dump the four live Postgres tables as SQLite-compatible INSERT statements,
+# ready for `wrangler d1 execute --file`. The cutover is done (2026-08-31), so this script is
+# kept only for a re-import from `cutover/*.sql`; nothing routine runs it.
 #
 # Run this ONCE, from a machine with a kubeconfig for the k3s cluster, while the old CronJob is
 # still writing. Output:

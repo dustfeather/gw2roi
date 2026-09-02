@@ -25,3 +25,16 @@ jobs:
       run-lint: false
       run-test: false
       run-audit: false
+
+  review:
+    if: github.event.action != 'closed'
+    needs: node
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    uses: dustfeather/shared-workflows/.github/workflows/claude-code-review.yml@v4
+    with:
+      runner: arc-df-gw2roi
+    secrets: inherit

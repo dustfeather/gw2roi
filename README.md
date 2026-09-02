@@ -1,5 +1,7 @@
 # GW2 Crafting-ROI Bot
 
+[![Deploy](https://github.com/dustfeather/gw2roi/actions/workflows/deploy.yml/badge.svg)](https://github.com/dustfeather/gw2roi/actions/workflows/deploy.yml)
+
 Ranks the **top-N craftable items by profit per craft** and renders them on a board at
 `gw2.itguys.ro`. Runs hourly as a Cloudflare Cron Trigger, over D1.
 Design: [`DESIGN.md`](./DESIGN.md).

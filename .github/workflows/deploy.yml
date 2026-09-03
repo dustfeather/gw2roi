@@ -31,10 +31,13 @@ on:
 permissions:
   contents: read
 
-# Not cancel-in-progress: a cancelled deploy could leave the two Workers on different commits.
+# Newest merge wins. A cancel landing between the two Worker deploys can leave
+# them on different commits, but the run that did the cancelling deploys both
+# itself, in the same order, off the newer commit — so the split closes on its
+# own, and sooner than queueing behind a superseded run would have.
 concurrency:
   group: deploy
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   # Gates both deploys. There is no test suite and no linter — typecheck is the only check,

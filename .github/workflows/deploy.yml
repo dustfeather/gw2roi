@@ -53,6 +53,8 @@ jobs:
       run-lint: false
       run-test: false
       run-audit: false
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   deploy-cron:
     needs: typecheck
@@ -85,6 +87,7 @@ jobs:
       expect-crons: 0 * * * *
       # No verify-url: this Worker has no HTTP route by design.
     secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_SECRETS: |
@@ -112,5 +115,6 @@ jobs:
       # "did the deployment go through", which wrangler's exit code plus the size and startup
       # gates already cover.
     secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -1,0 +1,36 @@
+version: 2
+
+# Dependabot ships two products behind one settings toggle. The repo-level
+# "Dependabot security updates" switch only reacts to a published advisory —
+# it opened nothing for the wrangler/miniflare/sharp chain until GHSA-rgj7-g3m4-5g8c
+# was filed. Routine drift needs *version* updates, which is this file.
+updates:
+  # pnpm workspace: one lockfile at the root covers apps/* and packages/*, so a
+  # single "/" entry is enough — Dependabot reads pnpm-workspace.yaml itself.
+  #
+  # Known trap on npm PRs here: dependabot-core regenerates pnpm-lock.yaml with
+  # its own advisory-driven `overrides:` block instead of mirroring the repo's
+  # `pnpm.overrides` (the @esbuild-kit/core-utils>esbuild pin in package.json).
+  # That desync makes a frozen install fail with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH
+  # on the bot's branch while main stays green. No config knob disables it —
+  # the fix is to regenerate the lockfile on the bot's branch and force-push.
+  # Upstream: pnpm/pnpm#9283.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # `directory: "/"` is correct regardless of where the workflows live —
+  # Dependabot always scans .github/workflows/ relative to the repo root.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]

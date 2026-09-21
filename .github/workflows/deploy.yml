@@ -48,7 +48,6 @@ jobs:
     uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v7
     with:
       runner: arc-df-gw2roi
-      pnpm-version: "10.33.4"
       run-typecheck: true
       run-lint: false
       run-test: false
@@ -66,7 +65,6 @@ jobs:
       # Monorepo: the lockfile and node_modules live at the root, the wrangler config does not.
       install-dir: .
       runner: arc-df-gw2roi
-      pnpm-version: "10.33.4"
       # Migrations run BEFORE the new code goes live, and only here. Under the old inline-DDL
       # model the first invocation after a deploy carried the DDL, which turned a schema failure
       # into a failed *run* rather than a failed *deploy*.
@@ -104,7 +102,6 @@ jobs:
       working-dir: apps/web
       install-dir: .
       runner: arc-df-gw2roi
-      pnpm-version: "10.33.4"
       # Rebuilds the committed Tailwind Text module, so a class added in a .tsx cannot ship
       # against stale CSS.
       build-command: pnpm build:css

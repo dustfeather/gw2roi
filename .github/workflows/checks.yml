@@ -29,7 +29,6 @@ jobs:
     uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v7
     with:
       runner: arc-df-gw2roi
-      pnpm-version: "10.33.4"
       run-typecheck: true
       run-lint: false
       run-test: false

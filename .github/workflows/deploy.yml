@@ -45,7 +45,7 @@ jobs:
   typecheck:
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v6
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v7
     with:
       runner: arc-df-gw2roi
       pnpm-version: "10.33.4"
@@ -60,7 +60,7 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v6
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v7
     with:
       working-dir: apps/cron
       # Monorepo: the lockfile and node_modules live at the root, the wrangler config does not.
@@ -99,7 +99,7 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v6
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v7
     with:
       working-dir: apps/web
       install-dir: .

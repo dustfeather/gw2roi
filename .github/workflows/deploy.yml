@@ -45,9 +45,8 @@ jobs:
   typecheck:
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v7
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v8
     with:
-      runner: arc-df-gw2roi
       run-typecheck: true
       run-lint: false
       run-test: false
@@ -59,12 +58,11 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v7
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
     with:
       working-dir: apps/cron
       # Monorepo: the lockfile and node_modules live at the root, the wrangler config does not.
       install-dir: .
-      runner: arc-df-gw2roi
       # Migrations run BEFORE the new code goes live, and only here. Under the old inline-DDL
       # model the first invocation after a deploy carried the DDL, which turned a schema failure
       # into a failed *run* rather than a failed *deploy*.
@@ -97,11 +95,10 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v7
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
     with:
       working-dir: apps/web
       install-dir: .
-      runner: arc-df-gw2roi
       # Rebuilds the committed Tailwind Text module, so a class added in a .tsx cannot ship
       # against stale CSS.
       build-command: pnpm build:css

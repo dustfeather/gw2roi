@@ -5,7 +5,7 @@ on:
     # `closed` is in this list to cancel this workflow's own in-flight run when
     # the PR merges. A merge fires no `synchronize`, so without it nothing ever
     # re-enters the concurrency group below, and the review job keeps a
-    # self-hosted runner busy on a commit that is already history. Every job is
+    # runner busy on a commit that is already history. Every job is
     # gated off `closed`, so the run this creates does no work: it exists only
     # to claim the group and cancel its predecessor.
     types: [opened, synchronize, reopened, closed]
@@ -26,9 +26,8 @@ jobs:
     # Reusable node CI from shared-workflows. pnpm-lock.yaml present -> auto-detects pnpm,
     # runs `pnpm typecheck`, which recurses into both Workers and packages/core.
     # Only typecheck is meaningful here (no lint or test scripts in this repo).
-    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v7
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v8
     with:
-      runner: arc-df-gw2roi
       run-typecheck: true
       run-lint: false
       run-test: false
@@ -44,7 +43,5 @@ jobs:
       pull-requests: write
       issues: read
       id-token: write
-    uses: dustfeather/shared-workflows/.github/workflows/claude-code-review.yml@v7
-    with:
-      runner: arc-df-gw2roi
+    uses: dustfeather/shared-workflows/.github/workflows/claude-code-review.yml@v8
     secrets: inherit

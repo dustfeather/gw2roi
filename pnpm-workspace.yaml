@@ -1,3 +1,32 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# pnpm 12 no longer reads the `pnpm` field from package.json, and a stale
+# `pnpm.overrides` there is ignored with only a [WARN] — the install still
+# exits 0. This entry is a security pin: @esbuild-kit/core-utils (deprecated,
+# reached through drizzle-kit) pulls esbuild 0.18.20, below the 0.25.0 fix for
+# the dev-server request-forwarding advisory. Removing it silently resolves
+# 0.18.20 again, which is exactly what happened on the first pnpm 12 install.
+overrides:
+  "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+
+# pnpm 10 denied lifecycle scripts by default and only WARNED about the ones it
+# skipped; pnpm 11+ turns that into a refused install, so every package with a
+# build script now needs an explicit decision. This repo has been building none
+# of them since it moved to pnpm 10, with CI green throughout, so every entry is
+# `false`: the behaviour already proven, now stated rather than defaulted.
+#
+#   esbuild, workerd  — the postinstall only materialises a platform binary the
+#                       optional platform packages already ship.
+#   @parcel/watcher   — native file-watching used by dev tooling only; it falls
+#                       back to polling when the prebuild is absent.
+#
+# Flipping one to `true` is a decision to run a third party's install script and
+# needs a reason. pnpm reseeds this block itself when a new such package appears,
+# writing `set this to true or false` — that is a prompt, not a value, and the
+# install stays refused until it is answered.
+allowBuilds:
+  "@parcel/watcher": false
+  esbuild: false
+  workerd: false

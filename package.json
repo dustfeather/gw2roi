@@ -5,7 +5,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "^12.0.0",
+      "version": "12.3.4",
       "onFail": "warn"
     }
   },
@@ -17,11 +17,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:remote": "wrangler d1 migrations apply gw2 --remote",
     "seed-cache": "bun run scripts/seed-cache.ts"
-  },
-  "pnpm": {
-    "overrides": {
-      "@esbuild-kit/core-utils>esbuild": "^0.25.0"
-    }
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260911.1",

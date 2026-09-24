@@ -10,14 +10,14 @@
   },
   "dependencies": {
     "@gw2/core": "workspace:*",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.3",
     "hono": "^4.13.8"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260919.1",
+    "@cloudflare/workers-types": "^5.20260921.1",
     "@tailwindcss/cli": "^4.3.1",
     "tailwindcss": "^4.3.1",
     "typescript": "^7.0.0",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.136.1"
   }
 }

@@ -47,6 +47,7 @@ jobs:
       contents: read
     uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v8
     with:
+      runner: arc-df-gw2roi
       run-typecheck: true
       run-lint: false
       run-test: false
@@ -60,6 +61,7 @@ jobs:
       contents: read
     uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
     with:
+      runner: arc-df-gw2roi
       working-dir: apps/cron
       # Monorepo: the lockfile and node_modules live at the root, the wrangler config does not.
       install-dir: .
@@ -97,6 +99,7 @@ jobs:
       contents: read
     uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
     with:
+      runner: arc-df-gw2roi
       working-dir: apps/web
       install-dir: .
       # Rebuilds the committed Tailwind Text module, so a class added in a .tsx cannot ship

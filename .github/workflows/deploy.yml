@@ -45,7 +45,7 @@ jobs:
   typecheck:
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v8
+    uses: dustfeather/shared-workflows/.github/workflows/node-test.yml@v9
     with:
       runner: arc-df-gw2roi
       run-typecheck: true
@@ -59,7 +59,7 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v9
     with:
       runner: arc-df-gw2roi
       working-dir: apps/cron
@@ -97,7 +97,7 @@ jobs:
     needs: typecheck
     permissions:
       contents: read
-    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v8
+    uses: dustfeather/shared-workflows/.github/workflows/deploy-cloudflare.yml@v9
     with:
       runner: arc-df-gw2roi
       working-dir: apps/web

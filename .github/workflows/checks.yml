@@ -4,7 +4,7 @@ on:
   pull_request:
     # `closed` is in this list to cancel this workflow's own in-flight run when
     # the PR merges. A merge fires no `synchronize`, so without it nothing ever
-    # re-enters the concurrency group below, and the review job keeps a
+    # re-enters the concurrency group below, and a running job keeps a
     # runner busy on a commit that is already history. Every job is
     # gated off `closed`, so the run this creates does no work: it exists only
     # to claim the group and cancel its predecessor.
@@ -36,18 +36,3 @@ jobs:
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  review:
-    # Human PRs are reviewed locally with the /code-review plugin, not in CI.
-    # What stays here is the Dependabot track, which ends on an approve/request-
-    # changes and so feeds dependabot-auto-merge.yml / merge-on-approval.yml.
-    if: github.event.action != 'closed' && github.event.pull_request.user.login == 'dependabot[bot]'
-    needs: node
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: read
-      id-token: write
-    uses: dustfeather/shared-workflows/.github/workflows/claude-code-review.yml@v9
-    with:
-      runner: arc-df-gw2roi
-    secrets: inherit
